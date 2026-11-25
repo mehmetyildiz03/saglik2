@@ -313,6 +313,21 @@ export function metricKey(result) {
   return result.system + "|" + measurementKey(result);
 }
 
+export function compareMeasurements(results, firstDate, secondDate) {
+  const groups = new Map();
+  for (const result of results) {
+    if (result.date !== firstDate && result.date !== secondDate) continue;
+    const unit = result.unit.replace(/\s/g, "").replaceAll("µ", "μ");
+    if (typeof result.value === "number" && !unit) continue;
+    // Unit symbols can be case-sensitive, so comparisons also require the same spelling.
+    const key = JSON.stringify([measurementKey({ ...result, unit }), unit]);
+    if (!groups.has(key)) groups.set(key, { first: [], second: [] });
+    groups.get(key)[result.date === firstDate ? "first" : "second"].push(result);
+  }
+  return [...groups.values()].filter(({ first, second }) => first.length && second.length)
+    .sort((a, b) => a.first[0].name.localeCompare(b.first[0].name, "tr"));
+}
+
 export const statuses = { "in-range": "Aralıkta", low: "Aralığın altında", high: "Aralığın üstünde", "no-range": "—" };
 const numberFormat = new Intl.NumberFormat("tr-TR", { maximumFractionDigits: 8, useGrouping: false });
 export const displayNumber = value => typeof value === "number" ? numberFormat.format(value) : value;

@@ -8,7 +8,8 @@ Denge bir tahlil defteri. Raporundaki ölçümleri sistemlere göre düzenler ve
 
 1. **Tahlil ekle** ile bir PDF, JPG, PNG, WebP veya metin dosyası seç. Dilersen rapor metnini yapıştır veya ölçümü elle gir.
 2. Kontrol ekranında her ölçümün tarihini, değerini, birimini ve referans aralığını raporla karşılaştır. Eksik bir ölçümü burada elle ekleyebilirsin. **Sonuçları kaydet** ile yeni kayıtları defterine ekle.
-3. **Analiz sistemleri** ekranında ölçüm grafiklerine, **Tahlil defterim** ekranında ise kayıtların tamamına ulaş.
+3. **Analiz sistemleri** ekranında bir ölçümü ara veya yıldızla favorilerine ekle. Geçmiş grafiğindeki bir noktaya dokunarak o günün sonucunu ve referans aralığını gör.
+4. **Tahlil defterim** ekranında **Tarihleri karşılaştır** ile iki tarihteki ortak ölçümleri yan yana aç.
 
 Metin raporlarında ölçüm adı ve sonuç aynı satırda olmalı. Tarihi bölüm başlığında veya ölçüm satırının başında belirtebilirsin. Noktalı virgülle ayrılmış metinde isteğe bağlı beşinci sütun ölçüm tarihidir. Birim ve referans isteğe bağlıdır.
 
@@ -38,10 +39,10 @@ python3 -m http.server 8000
 
 Sitenin bir derleme adımı yok. GitHub Actions içindeki **Publish Denge** akışı `main` güncellemelerinde siteyi yayımlar. Aynı akış **Run workflow** üzerinden elle de çalıştırılabilir.
 
-Rapor okuma kontrollerini Node.js 22 veya üzeri ile çalıştırabilirsin.
+Rapor okuma ve karşılaştırma kontrollerini Node.js 24 veya üzeri ile çalıştırabilirsin.
 
 ```sh
-node --test tests/report.test.mjs
+node --test tests/*.test.mjs
 ```
 
 PDF.js, Tesseract.js, Türkçe OCR modeli ve yazı tipleri siteyle birlikte sunulur. Kütüphane ve yazı tipi lisansları `vendor/` ve `assets/` dizinlerindedir.

@@ -1,5 +1,5 @@
 import {
-  demoResults, displayNumber, displayValue, knownNames, measurement, measurementKey, metricKey, normalize, parseReference,
+  compareMeasurements, demoResults, displayNumber, displayValue, knownNames, measurement, measurementKey, metricKey, normalize, parseReference,
   parseReport, parseValue, referenceText, statusOf, statuses, systemFor, systems, validDate,
 } from "./domain.js";
 
@@ -18,6 +18,7 @@ const icons = {
   arrow: '<path d="M5 12h14m-6-6 6 6-6 6"/>',
   plus: '<path d="M12 5v14M5 12h14"/>',
   sparkle: '<path d="M12 2c0 6 4 10 10 10-6 0-10 4-10 10 0-6-4-10-10-10 6 0 10-4 10-10Z"/>',
+  star: '<path d="m12 2 3.1 6.3 6.9 1-5 4.9 1.2 6.9-6.2-3.3-6.2 3.3 1.2-6.9-5-4.9 6.9-1z"/>',
   upload: '<path d="M12 16V3m-5 5 5-5 5 5M4 16v5h16v-5"/>',
   lock: '<rect x="5" y="10" width="14" height="11" rx="2"/><path d="M8 10V7a4 4 0 0 1 8 0v3m-4 5v2"/>',
   calendar: '<rect x="3" y="5" width="18" height="16" rx="3"/><path d="M7 3v4m10-4v4M3 10h18"/>',
@@ -59,6 +60,7 @@ let view = "overview";
 let systemId = "blood";
 let filter = "all";
 let search = "";
+let systemSearch = "";
 let toastTimer;
 let previousFocus;
 let modalRevision = 0;
@@ -66,6 +68,8 @@ let reportText = "";
 const viewIds = ["overview", "systems", "results"];
 
 const activeResults = () => state.demo ? demoResults : state.results;
+const favoriteMode = () => state.demo ? "demo" : "personal";
+const favoriteKeys = () => state.favorites?.[favoriteMode()] ?? [];
 
 function saveState(next) {
   try {
@@ -102,7 +106,13 @@ function badge(result) {
   return `<span class="status-pill ${status}">${statuses[status]}</span>`;
 }
 
-function chart(history, large = false) {
+function referenceCaption(result) {
+  const reference = referenceText(result);
+  return reference ? "Referans " + reference : "Referans kaydı yok";
+}
+
+function chart(history, selectedId = null) {
+  const large = selectedId !== null;
   const numeric = typeof history[0].value === "number";
   const plotted = history;
   const hasLimits = plotted.some(result => result.qualifier);
@@ -148,17 +158,20 @@ function chart(history, large = false) {
       line += `${connect ? "L" : "M"}${point.x},${point.y} `;
     }
   }
-  return `<svg class="metric-chart${large ? " chart-large" : ""}" viewBox="0 0 ${width} ${height}" role="img" aria-label="${escape(history[0].name)} zamana göre ölçüm grafiği">
+  return `<svg class="metric-chart${large ? " chart-large" : ""}" viewBox="0 0 ${width} ${height}" role="${large ? "group" : "img"}" aria-label="${escape(history[0].name)} zamana göre ölçüm grafiği">
     ${band}
     ${yTicks.map(value => `<line x1="${left}" x2="${right}" y1="${scaleY(value)}" y2="${scaleY(value)}" class="chart-grid"/><text x="${left - 7}" y="${scaleY(value) + 4}" text-anchor="end">${escape(numeric ? displayNumber(Number(value.toPrecision(5))) : values[value])}</text>`).join("")}
     ${line ? `<path d="${line}" class="chart-line"/>` : ""}
     ${points.map(({ x, y, result }) => {
-      const title = `<title>${escape(dateLabel(result.date))} · ${escape(displayValue(result))} ${escape(result.unit)}</title>`;
-      if (result.qualifier) {
-        const direction = result.qualifier.startsWith("<") ? 1 : -1;
-        return `<path d="M${x - 5},${y} L${x},${y + 6 * direction} L${x + 5},${y} Z" class="chart-limit">${title}</path>`;
-      }
-      return `<circle cx="${x}" cy="${y}" r="4.1" class="chart-point ${statusOf(result)}">${title}</circle>`;
+      const label = escape(dateLabel(result.date) + " · " + displayValue(result) + " " + result.unit);
+      const direction = result.qualifier?.startsWith("<") ? 1 : -1;
+      const mark = result.qualifier
+        ? `<path d="M${x - 5},${y} L${x},${y + 6 * direction} L${x + 5},${y} Z" class="chart-limit"/>`
+        : `<circle cx="${x}" cy="${y}" r="4.1" class="chart-point ${statusOf(result)}"/>`;
+      if (!large) return `<g><title>${label}</title>${mark}</g>`;
+      return `<g class="chart-target" role="button" tabindex="0" aria-label="${label}" aria-pressed="${result.id === selectedId}" data-point-id="${escape(result.id)}">
+        <circle cx="${x}" cy="${y}" r="11" class="chart-hit"/>${mark}
+      </g>`;
     }).join("")}
     ${xTicks.map(index => `<text x="${points[index].x}" y="${height - 7}" text-anchor="${index === 0 && xTicks.length > 1 ? "start" : index === xTicks.at(-1) && xTicks.length > 1 ? "end" : "middle"}">${escape(dateLabel(plotted[index].date, multipleYears ? yearDate : shortDate))}</text>`).join("")}
   </svg>${band ? '<div class="chart-legend"><span></span> Referans aralığı</div>' : ""}
@@ -176,14 +189,23 @@ function miniChart(history) {
 
 const systemIcon = system => `<span class="system-icon" data-color="${system.color}">${icon(system.icon)}</span>`;
 
-function metricCard(history) {
+function favoriteButton(result) {
+  return `<button class="favorite-button" type="button" data-action="favorite" data-id="${escape(result.id)}"
+    aria-pressed="${favoriteKeys().includes(metricKey(result))}" aria-label="${escape(result.name)} favorisi" title="Favoriye ekle veya favoriden çıkar">${icon("star")}</button>`;
+}
+
+function metricCard(history, showSystem = false) {
   const last = history.at(-1);
+  const previous = history.findLast(result => result.date < last.date);
   const reference = referenceText(last);
   return `<article class="section-card metric-card">
-    <div class="metric-top"><div class="metric-name">${escape(last.name)}</div>${badge(last)}</div>
+    <div class="metric-top"><div><div class="metric-name">${escape(last.name)}</div>${showSystem ? `<div class="metric-date">${systemFor(last.system).name}</div>` : ""}</div>
+      <div class="metric-actions">${badge(last)}${favoriteButton(last)}</div></div>
     <div class="metric-value-line"><strong>${escape(displayValue(last))}</strong><span>${escape(last.unit)}</span></div>
+    <div class="metric-date">Son ölçüm · ${dateLabel(last.date)}</div>
+    ${previous ? `<div class="metric-date">Önceki · <strong>${escape(displayValue(previous))}</strong> · ${dateLabel(previous.date)}</div>` : ""}
     ${chart(history)}
-    <div class="metric-foot"><span>${reference ? `Son referans <strong>${escape(reference)}</strong>` : escape(dateLabel(last.date))}</span>
+    <div class="metric-foot"><span>${reference ? `Son referans <strong>${escape(reference)}</strong>` : ""}</span>
       <button class="link-button" data-action="detail" data-id="${escape(last.id)}" type="button" aria-label="${escape(last.name)} geçmişi">Geçmişi gör ${icon("arrow")}</button>
     </div>
   </article>`;
@@ -234,6 +256,7 @@ function renderOverview() {
       <aside class="side-stack">
         <div class="summary-cards" aria-label="Son ölçümlerin özeti">${summary.map(([color, symbol, number, name]) =>
           `<div class="summary-card ${color}"><div class="summary-top">${icon(symbol)}</div><strong>${number}</strong><small>${name}</small></div>`).join("")}</div>
+        <div id="favorites-panel"></div>
         ${groups.length ? `<section class="section-card featured-card"><div class="section-card-heading"><div><h2>İlk grafiğini keşfet</h2><p>${escape(groups[0][0].name)} geçmişi</p></div></div>
           <div class="featured-plot">${chart(groups[0])}<button class="link-button" data-action="detail" data-id="${escape(groups[0].at(-1).id)}" type="button">Ölçümleri gör ${icon("arrow")}</button></div></section>`
           : `<div class="section-card note-card"><div class="note-heading"><span>${icon("sparkle")}</span> İlk grafiğin hazır olsun</div><p>İlk tahlilini eklediğinde ölçümler burada görünecek.</p></div>`}
@@ -241,6 +264,41 @@ function renderOverview() {
       </aside>
     </div>
     <p class="page-note">Sonuçlar raporundaki referans aralığına göre gösterilir. Tıbbi değerlendirme için doktoruna danış.</p>`;
+  renderFavorites(groups);
+}
+
+function renderFavorites(groups) {
+  const panel = $("#favorites-panel");
+  const favoriteSet = new Set(favoriteKeys());
+  const favorites = groups.filter(group => favoriteSet.has(metricKey(group[0])));
+  panel.hidden = !favorites.length;
+  panel.innerHTML = favorites.length ? `<section class="section-card">
+    <div class="section-card-heading"><h2>Favori ölçümler</h2></div>
+    <div class="system-list">${favorites.map(group => {
+      const result = group.at(-1);
+      return `<button class="favorite-row" data-action="detail" data-id="${escape(result.id)}" type="button">
+        ${icon("star")}<span><strong>${escape(result.name)}</strong><small>${dateLabel(result.date)}</small></span>
+        <b>${escape(displayValue(result))} <small>${escape(result.unit)}</small></b>
+      </button>`;
+    }).join("")}</div></section>` : "";
+}
+
+function toggleFavorite(id) {
+  const result = activeResults().find(item => item.id === id);
+  if (!result) return;
+  const current = loadState();
+  const mode = favoriteMode();
+  const favorites = new Set(current.favorites?.[mode] ?? []);
+  const key = metricKey(result);
+  const removing = favorites.delete(key);
+  if (!removing) favorites.add(key);
+  if (!saveState({ ...current, favorites: { ...current.favorites, [mode]: [...favorites] } })) return;
+  const ids = new Set(activeResults().filter(item => metricKey(item) === key).map(item => item.id));
+  for (const button of document.querySelectorAll('[data-action="favorite"]')) {
+    if (ids.has(button.dataset.id)) button.setAttribute("aria-pressed", String(!removing));
+  }
+  if (view === "overview") renderFavorites(resultGroups(activeResults()));
+  toast(removing ? "Ölçüm favorilerden çıkarıldı." : "Ölçüm favorilere eklendi.");
 }
 
 function renderSystems() {
@@ -248,6 +306,7 @@ function renderSystems() {
   const groups = resultGroups(activeResults().filter(result => result.system === systemId));
   $("#view-systems").innerHTML = `
     <div class="page-heading"><h1>Analiz sistemleri</h1><p>Her ölçümün kendi grafiği var.</p></div>
+    <div class="filter-row"><input class="text-input search-input" type="search" id="system-search" aria-label="Tüm sistemlerde ölçüm ara" placeholder="Ölçüm ara" value="${escape(systemSearch)}"></div>
     <div class="system-tabs" aria-label="Analiz sistemi seç">${systems.map(item =>
       `<button class="system-tab ${item.id === systemId ? "active" : ""}" data-action="system-tab" data-system="${item.id}" aria-pressed="${item.id === systemId}" type="button">${icon(item.icon)} ${item.name}</button>`).join("")}</div>
     <section class="system-detail" data-color="${system.color}">
@@ -255,9 +314,26 @@ function renderSystems() {
       <div class="detail-copy"><h2>${system.name}</h2><p>${system.description}</p></div>
       <div class="detail-count"><strong>${groups.length}</strong><span>farklı ölçüm</span></div>
     </section>
-    ${groups.length ? `<div class="system-metrics">${groups.map(metricCard).join("")}</div>`
-      : emptyState("Burada henüz ölçüm yok", "Bu sisteme ait bir sonuç eklersen, ilk grafiğin burada görünecek.")}
+    <div id="system-metric-list"></div>
     <p class="page-note">${state.demo ? "Örnek verileri inceliyorsun. " : ""}Aynı ölçümün farklı birimlerindeki sonuçlar ayrı grafiklerde gösterilir.</p>`;
+  $("#system-search").addEventListener("input", event => {
+    systemSearch = event.target.value;
+    renderSystemMetrics();
+  });
+  renderSystemMetrics();
+}
+
+function renderSystemMetrics() {
+  const query = normalize(systemSearch.trim());
+  const known = measurement(query);
+  const groups = resultGroups(activeResults().filter(result => query
+    ? normalize(result.name).includes(query) || result.name === known?.name
+    : result.system === systemId));
+  $("#view-systems .system-detail").hidden = Boolean(query);
+  $("#system-metric-list").innerHTML = groups.length
+    ? `<div class="system-metrics">${groups.map(group => metricCard(group, Boolean(query))).join("")}</div>`
+    : query ? '<p class="section-card empty-state">Aramana uygun ölçüm bulunamadı.</p>'
+      : emptyState("Burada henüz ölçüm yok", "Bu sisteme ait bir sonuç eklersen, ilk grafiğin burada görünecek.");
 }
 
 function resultList() {
@@ -275,8 +351,10 @@ function resultList() {
 }
 
 function renderResults() {
+  const dates = resultDates();
   $("#view-results").innerHTML = `
-    <div class="page-heading"><h1>Tahlil defterim</h1><p>${state.demo ? "Örnek sonuçları incele veya kendi sonuçlarını ekle." : "Kayıtlarını tarih, ölçüm adı ve analiz sistemine göre bul."}</p></div>
+    <div class="page-heading notebook-heading"><div><h1>Tahlil defterim</h1><p>${state.demo ? "Örnek sonuçları incele veya kendi sonuçlarını ekle." : "Kayıtlarını tarih, ölçüm adı ve analiz sistemine göre bul."}</p></div>
+      ${dates.length > 1 ? `<button class="secondary-button compare-button" data-action="compare" type="button">${icon("calendar")} Tarihleri karşılaştır</button>` : ""}</div>
     <div class="filter-row"><input class="text-input search-input" type="search" id="result-search" aria-label="Tahlil ara" placeholder="Ölçüm ara" value="${escape(search)}">
       <select id="system-filter" class="select-filter" aria-label="Sisteme göre filtrele">
         <option value="all">Tüm sistemler</option>${systems.map(system => `<option value="${system.id}" ${filter === system.id ? "selected" : ""}>${system.name}</option>`).join("")}
@@ -286,6 +364,59 @@ function renderResults() {
   $("#result-search").addEventListener("input", event => { search = event.target.value; resultList(); });
   $("#system-filter").addEventListener("change", event => { filter = event.target.value; resultList(); });
   resultList();
+}
+
+function resultDates() {
+  return [...new Set(activeResults().map(result => result.date))].sort().reverse();
+}
+
+function showComparison() {
+  const dates = resultDates();
+  if (dates.length < 2) return;
+  function dateOptions(selected) {
+    return dates.map(date => `<option value="${escape(date)}" ${date === selected ? "selected" : ""}>${dateLabel(date)}</option>`).join("");
+  }
+  openModal(`<h2 id="modal-title">Tahlil tarihlerini karşılaştır</h2>
+    <p class="modal-intro">İki tarih seç. Her iki tarihte de aynı birimle kaydedilen ölçümler birlikte görünür.</p>
+    <div class="form-grid compare-dates">
+      <div><label class="field-label" for="compare-first">Birinci tarih</label><select id="compare-first" class="select-input">${dateOptions(dates[1])}</select></div>
+      <div><label class="field-label" for="compare-second">İkinci tarih</label><select id="compare-second" class="select-input">${dateOptions(dates[0])}</select></div>
+    </div>
+    <div id="comparison-results"></div>`);
+  $("#compare-first").addEventListener("change", renderComparison);
+  $("#compare-second").addEventListener("change", renderComparison);
+  renderComparison();
+}
+
+function renderComparison() {
+  const [firstDate, secondDate] = [$("#compare-first").value, $("#compare-second").value].sort();
+  const container = $("#comparison-results");
+  if (firstDate === secondDate) {
+    container.innerHTML = '<p class="compare-note" role="status">Karşılaştırmak için iki farklı tarih seç.</p>';
+    return;
+  }
+  const matched = compareMeasurements(activeResults(), firstDate, secondDate);
+  if (!matched.length) {
+    container.innerHTML = '<p class="compare-note" role="status">Bu iki tarihte aynı birimle kaydedilmiş ortak bir ölçüm yok.</p>';
+    return;
+  }
+  function column(records, date) {
+    return `<div class="compare-column"><span>${dateLabel(date)}</span>
+      ${records.map(record => `<div class="compare-reading"><strong>${escape(displayValue(record))} <small>${escape(record.unit)}</small></strong><small>${escape(referenceCaption(record))}</small></div>`).join("")}
+    </div>`;
+  }
+  container.innerHTML = `<p class="compare-note" role="status">${matched.length} ortak ölçüm</p>
+    <div class="comparison-list">${matched.map(({ first, second }) => {
+      const exactPair = first.length === 1 && second.length === 1 &&
+        [first[0], second[0]].every(record => typeof record.value === "number" && !record.qualifier);
+      const delta = exactPair ? second[0].value - first[0].value : null;
+      const difference = delta === null ? "" : displayNumber(delta);
+      return `<section class="comparison-card">
+        <div class="comparison-heading"><h3>${escape(first[0].name)}</h3>
+          ${difference ? `<span>Fark ${delta > 0 && difference !== "0" ? "+" : ""}${escape(difference === "-0" ? "0" : difference)}</span>` : ""}</div>
+        <div class="compare-grid">${column(first, firstDate)}${column(second, secondDate)}</div>
+      </section>`;
+    }).join("")}</div>`;
 }
 
 function renderQuest() {
@@ -316,7 +447,10 @@ function render() {
 
 function navigate(next, system) {
   view = next;
-  if (system) systemId = system;
+  if (system) {
+    systemId = system;
+    systemSearch = "";
+  }
   if (location.hash !== "#" + view) history.pushState(null, "", "#" + view);
   render();
   window.scrollTo(0, 0);
@@ -367,16 +501,31 @@ function showDetail(id) {
     }
   }
   openModal(`<p class="eyebrow">${systemFor(result.system).name}${state.demo ? " · ÖRNEK" : ""}</p>
-    <h2 id="modal-title">${escape(result.name)}</h2>
+    <div class="detail-heading"><h2 id="modal-title">${escape(result.name)}</h2>${favoriteButton(result)}</div>
     <p class="modal-intro">${history.length} kayıt${result.unit ? ` · ${escape(result.unit)}` : ""}</p>
-    <div class="history-plot">${chart(history, true)}</div>
+    <div class="history-plot">${chart(history, id)}</div>
+    <div class="point-details" id="point-details" aria-live="polite"></div>
     <h3 class="history-heading">Ölçüm geçmişi</h3>
     <div class="history-list">${history.slice().reverse().map(item => `
-      <div class="history-row ${item.id === id ? "highlight" : ""}"><span><strong>${escape(dateLabel(item.date))}</strong><small>${referenceText(item) ? `Referans ${escape(referenceText(item))}` : "Referans kaydı yok"}</small></span>
+      <div class="history-row"><span><button class="history-date" data-point-id="${escape(item.id)}" type="button">${dateLabel(item.date)}</button><small>${escape(referenceCaption(item))}</small></span>
         <span class="history-value">${escape(displayValue(item))} <small>${escape(item.unit)}</small></span>
         ${badge(item)}
         ${state.demo ? "" : `<button type="button" class="link-button" data-action="edit" data-id="${escape(item.id)}">Düzenle</button>`}
       </div>`).join("")}</div>`);
+  selectChartPoint(id);
+}
+
+function selectChartPoint(id) {
+  const result = activeResults().find(item => item.id === id);
+  const details = $("#point-details");
+  if (!result || !details) return;
+  for (const point of $("#result-modal").querySelectorAll("[data-point-id]")) {
+    const selected = point.dataset.pointId === id;
+    point.setAttribute("aria-pressed", String(selected));
+    point.closest(".history-row")?.classList.toggle("highlight", selected);
+  }
+  details.innerHTML = `<div><span>${dateLabel(result.date)}</span><strong>${escape(displayValue(result))} <small>${escape(result.unit)}</small></strong></div>
+    <div><span>${escape(referenceCaption(result))}</span>${badge(result)}</div>`;
 }
 
 function options(system) {
@@ -747,6 +896,11 @@ function toggleDemo() {
 }
 
 document.addEventListener("click", event => {
+  const point = event.target.closest("[data-point-id]");
+  if (point) {
+    selectChartPoint(point.dataset.pointId);
+    return;
+  }
   const button = event.target.closest("button");
   if (button?.dataset.view) {
     navigate(button.dataset.view, button.dataset.system);
@@ -758,6 +912,8 @@ document.addEventListener("click", event => {
     case "example": $("#report-text").value = example; formStatus(""); break;
     case "parse": parseInput(); break;
     case "detail": showDetail(button.dataset.id); break;
+    case "favorite": toggleFavorite(button.dataset.id); break;
+    case "compare": showComparison(); break;
     case "edit": editResult(button.dataset.id); break;
     case "confirm-delete": confirmDelete(button.dataset.id); break;
     case "delete": removeResult(button.dataset.id); break;
@@ -775,6 +931,7 @@ document.addEventListener("click", event => {
     }
     case "system-tab":
       systemId = button.dataset.system;
+      systemSearch = "";
       renderSystems();
       $(`.system-tab[data-system="${systemId}"]`).focus();
       break;
@@ -796,8 +953,13 @@ $("#modal-backdrop").addEventListener("click", event => {
 document.addEventListener("keydown", event => {
   if ($("#modal-backdrop").hidden) return;
   if (event.key === "Escape") closeModal();
+  const point = event.target.closest("g[data-point-id]");
+  if (point && (event.key === "Enter" || event.key === " ")) {
+    event.preventDefault();
+    selectChartPoint(point.dataset.pointId);
+  }
   if (event.key !== "Tab") return;
-  const focusable = [...$("#result-modal").querySelectorAll("button:not(:disabled), input:not(:disabled), select, textarea")]
+  const focusable = [...$("#result-modal").querySelectorAll('button:not(:disabled), input:not(:disabled), select, textarea, [tabindex="0"]')]
     .filter(element => element.getClientRects().length > 0);
   const target = event.shiftKey ? focusable[0] : focusable.at(-1);
   if (document.activeElement === target) {
