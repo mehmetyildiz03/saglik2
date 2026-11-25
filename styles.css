@@ -278,7 +278,7 @@ main { width: min(1270px, 100%); margin: 0 auto; padding: 34px clamp(22px, 4.5vw
 .chart-line { fill: none; stroke: #3e8763; stroke-width: 2.2; stroke-linecap: round; stroke-linejoin: round; }
 .chart-point { fill: #3e8763; stroke: #fff; stroke-width: 1.5; }
 .chart-point.high, .chart-point.low { fill: #b9603c; }
-.chart-empty { min-height: 65px; color: var(--muted); font-size: 13px; }
+.chart-limit { fill: #5b5196; stroke: #fff; stroke-width: 1; }
 .chart-legend { display: flex; align-items: center; gap: 6px; color: var(--muted); font-size: 11px; }
 .chart-legend span { width: 12px; height: 9px; border-radius: 3px; background: #e7f4e9; border: 1px solid #c6dfcc; }
 .metric-foot { display: flex; justify-content: space-between; align-items: center; gap: 8px; margin-top: 6px; color: var(--muted); font-size: 12px; }

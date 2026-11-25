@@ -5,6 +5,8 @@ const ocrAssets = new URL("./vendor/ocr/", import.meta.url);
 const maxBytes = 20 * 1024 * 1024;
 const maxPages = 12;
 
+export class ReportReadError extends Error {}
+
 function pdfLines(items) {
   const fragments = items.filter(item => item.str?.trim()).map(item => ({
     text: item.str.trim(), x: item.transform[4], y: item.transform[5], height: item.height,
@@ -74,23 +76,29 @@ async function readPdf(file, reportProgress) {
   let worker;
   try {
     const documentFile = await loading.promise;
-    if (documentFile.numPages > maxPages) throw new Error(`En fazla ${maxPages} sayfalık PDF okuyabilirsin. Tahlil sayfalarını ayrı bir dosyada seç.`);
+    if (documentFile.numPages > maxPages) throw new ReportReadError(`En fazla ${maxPages} sayfalık PDF okuyabilirsin. Tahlil sayfalarını ayrı bir dosyada seç.`);
+    const imageOperations = new Set([
+      pdf.OPS.paintImageXObject, pdf.OPS.paintInlineImageXObject, pdf.OPS.paintInlineImageXObjectGroup,
+      pdf.OPS.paintImageMaskXObject, pdf.OPS.paintImageXObjectRepeat,
+    ]);
     const pages = [];
     for (let number = 1; number <= documentFile.numPages; number++) {
       reportProgress(`PDF sayfası ${number}/${documentFile.numPages} okunuyor…`);
       const page = await documentFile.getPage(number);
       const content = await page.getTextContent();
       const text = pdfLines(content.items);
-      if (text.replace(/\s/g, "").length >= 60 || parseReport(text).length) {
-        pages.push(text);
-      } else {
+      const hasScans = !parseReport(text).length && (await page.getOperatorList()).fnArray.some(operation => imageOperations.has(operation));
+      if (hasScans) {
         const viewport = page.getViewport({ scale: Math.min(2.4, 2500 / Math.max(page.view[2] - page.view[0], page.view[3] - page.view[1])) });
         const canvas = document.createElement("canvas");
         canvas.width = Math.ceil(viewport.width);
         canvas.height = Math.ceil(viewport.height);
         await page.render({ canvasContext: canvas.getContext("2d"), viewport }).promise;
         worker ??= await createOcr(reportProgress);
-        pages.push((await worker.recognize(canvas)).data.text);
+        const scanned = (await worker.recognize(canvas)).data.text;
+        pages.push(parseReport(scanned).length ? scanned : text);
+      } else {
+        pages.push(text);
       }
       page.cleanup();
     }
@@ -102,10 +110,10 @@ async function readPdf(file, reportProgress) {
 }
 
 export async function readReportFile(file, reportProgress) {
-  if (!file.size) throw new Error("Bu dosya boş.");
-  if (file.size > maxBytes) throw new Error("20 MB veya daha küçük bir dosya seç.");
+  if (!file.size) throw new ReportReadError("Bu dosya boş.");
+  if (file.size > maxBytes) throw new ReportReadError("20 MB veya daha küçük bir dosya seç.");
   if (/\.pdf$/i.test(file.name)) return readPdf(file, reportProgress);
   if (/\.(?:jpg|jpeg|png|webp)$/i.test(file.name)) return recognizeImage(file, reportProgress);
   if (/\.(?:txt|tsv|csv)$/i.test(file.name)) return file.text();
-  throw new Error("PDF, JPG, PNG, WebP, TXT veya noktalı virgülle ayrılmış CSV dosyası seç.");
+  throw new ReportReadError("PDF, JPG, PNG, WebP, TXT veya noktalı virgülle ayrılmış CSV dosyası seç.");
 }

@@ -31,6 +31,6 @@ Statik siteyi çalıştırmak için deponun kök dizininde aşağıdaki komutu �
 python3 -m http.server 8000
 ```
 
-Sitenin bir derleme adımı yok. GitHub Pages için deponun `main` dalının kök dizini kullanılabilir.
+Sitenin bir derleme adımı yok. GitHub Actions içindeki **Publish Denge** akışı `main` güncellemelerinde siteyi yayımlar. Aynı akış **Run workflow** üzerinden elle de çalıştırılabilir.
 
 PDF.js, Tesseract.js, Türkçe OCR modeli ve yazı tipleri siteyle birlikte sunulur. Kütüphane ve yazı tipi lisansları `vendor/` ve `assets/` dizinlerindedir.

@@ -31,6 +31,7 @@ const $ = selector => document.querySelector(selector);
 const storageKey = "denge.saglik2.v1";
 const fullDate = new Intl.DateTimeFormat("tr-TR", { day: "numeric", month: "long", year: "numeric", timeZone: "UTC" });
 const shortDate = new Intl.DateTimeFormat("tr-TR", { day: "numeric", month: "short", timeZone: "UTC" });
+const yearDate = new Intl.DateTimeFormat("tr-TR", { month: "short", year: "numeric", timeZone: "UTC" });
 const dateLabel = (date, formatter = fullDate) => formatter.format(new Date(date + "T00:00:00Z"));
 const today = () => new Intl.DateTimeFormat("sv-SE").format(new Date());
 const example = "Rapor tarihi: 13.11.2026\nHemoglobin 13,8 g/dL 12 – 16\nLDL kolesterol 136 mg/dL <130\nALT 24 U/L 7 – 40\nD vitamini 28 ng/mL 30 – 100\nTSH 2,2 mIU/L 0,4 – 4";
@@ -97,8 +98,9 @@ function badge(result) {
 
 function chart(history, large = false) {
   const numeric = typeof history[0].value === "number";
-  const plotted = history.filter(result => !result.qualifier && result.date);
-  if (!plotted.length) return '<p class="chart-empty">Bu grafikte sayısal olarak işaretlenebilen bir ölçüm yok. Raporun gösterdiği değerleri geçmişte görebilirsin.</p>';
+  const plotted = history;
+  const hasLimits = plotted.some(result => result.qualifier);
+  const multipleYears = plotted[0].date.slice(0, 4) !== plotted.at(-1).date.slice(0, 4);
 
   const width = 420;
   const height = large ? 160 : 125;
@@ -129,16 +131,32 @@ function chart(history, large = false) {
     : values.map((_, index) => index);
   const xTicks = timestamps[0] === timestamps.at(-1) ? [0]
     : timestamps.length > 3 ? [0, Math.floor((timestamps.length - 1) / 2), timestamps.length - 1] : [0, timestamps.length - 1];
-  const band = sharedRange
+  const band = sharedRange && (range.min !== range.max)
     ? `<rect x="${left}" y="${scaleY(range.max ?? max)}" width="${right - left}" height="${Math.max(0, scaleY(range.min ?? min) - scaleY(range.max ?? max))}" rx="4" class="chart-band"/>`
     : "";
+  let line = "";
+  if (numeric) {
+    for (const [index, point] of points.entries()) {
+      if (point.result.qualifier) continue;
+      const connect = index > 0 && !points[index - 1].result.qualifier;
+      line += `${connect ? "L" : "M"}${point.x},${point.y} `;
+    }
+  }
   return `<svg class="metric-chart${large ? " chart-large" : ""}" viewBox="0 0 ${width} ${height}" role="img" aria-label="${escape(history[0].name)} zamana göre ölçüm grafiği">
     ${band}
     ${yTicks.map(value => `<line x1="${left}" x2="${right}" y1="${scaleY(value)}" y2="${scaleY(value)}" class="chart-grid"/><text x="${left - 7}" y="${scaleY(value) + 4}" text-anchor="end">${escape(numeric ? displayNumber(Number(value.toPrecision(5))) : values[value])}</text>`).join("")}
-    ${numeric && points.length > 1 ? `<polyline points="${points.map(({ x, y }) => `${x},${y}`).join(" ")}" class="chart-line"/>` : ""}
-    ${points.map(({ x, y, result }) => `<circle cx="${x}" cy="${y}" r="4.1" class="chart-point ${statusOf(result)}"><title>${escape(dateLabel(result.date))} · ${escape(displayValue(result))} ${escape(result.unit)}</title></circle>`).join("")}
-    ${xTicks.map(index => `<text x="${points[index].x}" y="${height - 7}" text-anchor="${index === 0 && xTicks.length > 1 ? "start" : index === xTicks.at(-1) && xTicks.length > 1 ? "end" : "middle"}">${escape(dateLabel(plotted[index].date, shortDate))}</text>`).join("")}
-  </svg>${sharedRange ? '<div class="chart-legend"><span></span> Referans aralığı</div>' : ""}`;
+    ${line ? `<path d="${line}" class="chart-line"/>` : ""}
+    ${points.map(({ x, y, result }) => {
+      const title = `<title>${escape(dateLabel(result.date))} · ${escape(displayValue(result))} ${escape(result.unit)}</title>`;
+      if (result.qualifier) {
+        const direction = result.qualifier.startsWith("<") ? 1 : -1;
+        return `<path d="M${x - 5},${y} L${x},${y + 6 * direction} L${x + 5},${y} Z" class="chart-limit">${title}</path>`;
+      }
+      return `<circle cx="${x}" cy="${y}" r="4.1" class="chart-point ${statusOf(result)}">${title}</circle>`;
+    }).join("")}
+    ${xTicks.map(index => `<text x="${points[index].x}" y="${height - 7}" text-anchor="${index === 0 && xTicks.length > 1 ? "start" : index === xTicks.at(-1) && xTicks.length > 1 ? "end" : "middle"}">${escape(dateLabel(plotted[index].date, multipleYears ? yearDate : shortDate))}</text>`).join("")}
+  </svg>${band ? '<div class="chart-legend"><span></span> Referans aralığı</div>' : ""}
+  ${hasLimits ? '<div class="chart-legend">▲ ▼ Raporlanan ölçüm sınırı</div>' : ""}`;
 }
 
 function miniChart(history) {
@@ -467,6 +485,9 @@ function sameResult(first, second) {
 }
 
 function saveResults(records, existing) {
+  if (existing && state.results.some(result => result.id !== existing.id && sameResult(records[0], result))) {
+    throw new Error("Bu değer aynı tarih için zaten kayıtlı.");
+  }
   const results = state.results.filter(result => result.id !== existing?.id);
   let added = 0;
   for (const record of records) {
@@ -500,18 +521,25 @@ async function processFile(file) {
   const current = ++modalRevision;
   $("#parse-button").disabled = true;
   formStatus("Dosya tarayıcıda açılıyor…");
+  let reader;
   try {
-    const { readReportFile } = await import("./reader.js");
-    const text = await readReportFile(file, message => {
+    reader = await import("./reader.js");
+    const text = await reader.readReportFile(file, message => {
       if (modalRevision === current) formStatus(message);
     });
     if (modalRevision !== current) return;
-    $("#report-text").value = text.slice(0, 600000);
+    if (text.length > 600000) {
+      formStatus("Rapor metni çok uzun. Yalnızca tahlil sayfalarını içeren bir dosya seç.", true);
+      return;
+    }
+    $("#report-text").value = text;
     parseInput();
   } catch (error) {
     if (modalRevision !== current) return;
-    const detail = /.$/.test(error.message) && /[çÇğĞıİöÖşŞüÜ]/.test(error.message) ? error.message : "";
-    formStatus(detail || "Dosya okunamadı. Rapor metnini yapıştırabilir veya sonuçları elle girebilirsin.", true);
+    let message = "Dosya okunamadı. Rapor metnini yapıştırabilir veya sonuçları elle girebilirsin.";
+    if (reader && error instanceof reader.ReportReadError) message = error.message;
+    if (error.name === "PasswordException") message = "Bu PDF parola korumalı. Metni yapıştırabilir veya sonuçları elle girebilirsin.";
+    formStatus(message, true);
   } finally {
     if (modalRevision === current && $("#parse-button")) $("#parse-button").disabled = false;
   }
@@ -522,6 +550,10 @@ function parseInput() {
   pendingRows = parseReport(reportText);
   if (!pendingRows.length) {
     formStatus("Ölçüm bulunamadı. Her satırda önce test adı, sonra sonuç olacak şekilde metni düzenleyebilir veya elle girebilirsin.", true);
+    return;
+  }
+  if (pendingRows.length > 200) {
+    formStatus("Bir seferde en fazla 200 ölçüm ekleyebilirsin. Raporu birkaç parçaya ayır.", true);
     return;
   }
   draftDate = reportDate(reportText);

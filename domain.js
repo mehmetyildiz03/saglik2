@@ -156,26 +156,29 @@ export function reportDate(input) {
 const numberPattern = "[-+−]?(?:\\d+(?:[.,]\\d+)?|[.,]\\d+)";
 const rangePattern = new RegExp(`^(${numberPattern})\\s*(?:[-–—]|ile)\\s*(${numberPattern})$`, "i");
 const limitPattern = new RegExp(`^([<>]=?|[≤≥])\\s*(${numberPattern})$`);
-const priorityAliases = [...aliases.keys()].sort((first, second) => second.length - first.length);
+const aliasPatterns = [...aliases.keys()].sort((first, second) => second.length - first.length)
+  .map(key => new RegExp(`^${key.split(" ").join("[^a-z0-9%#]+")}(?=$|[^a-z0-9%#])`));
+const numericResultPattern = new RegExp(`^([<>]=?|[≤≥])?\\s*${numberPattern}(?=$|[^\\d.,])`);
+const qualitativeResultPattern = /^(negatif|negative|pozitif|positive|non[- ]?reaktif|reaktif|saptanmadı|saptandı|eser|yok|var)(?=\s|$)/iu;
 
 function resultInLine(line) {
   const input = line.trim().replace(/^[•*]\s*/, "");
   const separators = /[;|\t]/;
-  const columns = input.split(separators).map(part => part.trim()).filter(Boolean);
+  const columns = input.split(separators).map(part => part.trim());
   if (columns.length >= 2 && /\p{L}/u.test(columns[0])) {
     const result = parseValue(columns[1]);
     if (result) return { name: columns[0], result, tail: columns.slice(2).join(" ") };
   }
 
   // Explicit names at the start keep dates, reference bounds and patient metadata out of the value.
-  for (const key of priorityAliases) {
-    const pattern = key.split(" ").map(part => part.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")).join("[^a-z0-9%#]+");
-    const match = normalize(input).match(new RegExp(`^${pattern}(?=$|[^a-z0-9%#])`));
+  const normalized = normalize(input);
+  for (const pattern of aliasPatterns) {
+    const match = normalized.match(pattern);
     if (!match) continue;
     const tail = input.slice(match[0].length).replace(/^[\s:;|=)\]]+/, "").replace(/^\*\s*/, "");
-    const valueMatch = tail.match(new RegExp(`^([<>]=?|[≤≥])?\\s*(${numberPattern})(?=$|[^\\d.,])`));
+    const valueMatch = tail.match(numericResultPattern);
     if (valueMatch) return { name: input.slice(0, match[0].length), result: parseValue(valueMatch[0]), tail: tail.slice(valueMatch[0].length) };
-    const wordMatch = tail.match(/^(negatif|negative|pozitif|positive|non[- ]?reaktif|reaktif|saptanmadı|saptandı|eser|yok|var)(?=\s|$)/iu);
+    const wordMatch = tail.match(qualitativeResultPattern);
     if (wordMatch) return { name: input.slice(0, match[0].length), result: parseValue(wordMatch[0]), tail: tail.slice(wordMatch[0].length) };
   }
   return null;
@@ -186,7 +189,6 @@ const referenceAtEnd = new RegExp(`(?:^|\\s)(\\(?\\s*(?:${numberPattern}\\s*(?:[
 export function parseReport(text) {
   const rows = [];
   for (const line of text.split(/\r?\n/)) {
-    if (rows.length >= 200) break;
     const entry = resultInLine(line);
     if (!entry || !entry.result || entry.name.length > 100) continue;
     if (/^(?:tarih|yaş|cinsiyet|hasta|doğum|protokol|dosya|sonuç|kimlik|tc\b|barkod)/i.test(normalize(entry.name))) continue;
