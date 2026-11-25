@@ -1,0 +1,72 @@
+<!doctype html>
+<html lang="tr">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <meta name="theme-color" content="#f7f8f2" />
+    <meta name="description" content="Tahlil sonuçlarını anlaşılır kartlar ve kişisel grafiklerle takip et. Verilerin cihazında kalır." />
+    <title>Denge — Sağlığını keşfet</title>
+    <link rel="icon" href="favicon.svg" type="image/svg+xml" />
+    <link rel="stylesheet" href="styles.css" />
+  </head>
+  <body>
+    <div class="app-shell">
+      <aside class="sidebar" aria-label="Ana menü">
+        <a class="brand" href="#overview" aria-label="Denge ana sayfa">
+          <span class="brand-mark" aria-hidden="true"><svg viewBox="0 0 40 40"><path d="M20 33C11.7 27.3 7.9 20.3 9.8 11.2 18.8 10 25.4 13 28.1 18.7 30.1 22.9 27.9 28.3 20 33Z"/><path d="M14.4 25.6c4-4.1 7.5-6.5 12.3-8.2"/><path d="M21.6 28.2c-.6-5.5-2.1-9.4-5.1-13"/></svg></span>
+          <span class="brand-word">denge<span>.</span></span>
+        </a>
+
+        <p class="nav-label">TAKİP</p>
+        <nav class="main-nav">
+          <button class="nav-item active" data-view="overview" type="button"><span class="nav-icon">⌂</span> Genel bakış</button>
+          <button class="nav-item" data-view="systems" type="button"><span class="nav-icon">◉</span> Analiz sistemleri</button>
+          <button class="nav-item" data-view="results" type="button"><span class="nav-icon">▤</span> Tahlil defterim</button>
+        </nav>
+
+        <div class="sidebar-spacer"></div>
+        <section class="quest-card" aria-labelledby="quest-title">
+          <div class="quest-orbit" aria-hidden="true"><span>✦</span></div>
+          <p class="eyebrow">MİNİ GÖREV</p>
+          <h2 id="quest-title">Grafikleri keşfet</h2>
+          <p>Üç farklı ölçümün geçmişini aç ve keşif yıldızlarını topla.</p>
+          <div class="quest-progress" aria-label="Keşif görevi ilerlemesi"><span id="quest-progress-fill"></span></div>
+          <div class="quest-footer"><span id="quest-progress-label">0 / 3 keşif</span><span aria-hidden="true">✦ ✦ ✦</span></div>
+          <button class="quest-button" id="quest-button" type="button">Göreve başla <span aria-hidden="true">↗</span></button>
+        </section>
+        <div class="privacy-note"><span aria-hidden="true">🔒</span><span>Sonuçların bu tarayıcıda saklanır.</span></div>
+      </aside>
+
+      <div class="main-area">
+        <header class="topbar">
+          <div class="mobile-brand"><span class="brand-mark" aria-hidden="true"><svg viewBox="0 0 40 40"><path d="M20 33C11.7 27.3 7.9 20.3 9.8 11.2 18.8 10 25.4 13 28.1 18.7 30.1 22.9 27.9 28.3 20 33Z"/><path d="M14.4 25.6c4-4.1 7.5-6.5 12.3-8.2"/><path d="M21.6 28.2c-.6-5.5-2.1-9.4-5.1-13"/></svg></span><span class="brand-word">denge<span>.</span></span></div>
+          <div class="topbar-spacer"></div>
+          <button class="text-button" id="about-button" type="button"><span class="help-mark">?</span> Denge nasıl çalışır?</button>
+          <button class="primary-button top-add" id="add-result-button" type="button"><span aria-hidden="true">＋</span> Tahlil ekle</button>
+        </header>
+
+        <main id="main-content" tabindex="-1">
+          <div id="view-overview" class="view active-view"></div>
+          <div id="view-systems" class="view"></div>
+          <div id="view-results" class="view"></div>
+        </main>
+
+        <nav class="mobile-nav" aria-label="Alt menü">
+          <button class="mobile-nav-item active" data-view="overview" type="button"><span>⌂</span>Özet</button>
+          <button class="mobile-nav-item" data-view="systems" type="button"><span>◉</span>Sistemler</button>
+          <button class="mobile-nav-item" data-view="results" type="button"><span>▤</span>Defterim</button>
+        </nav>
+      </div>
+    </div>
+
+    <div class="modal-backdrop" id="modal-backdrop" hidden>
+      <section class="modal" role="dialog" aria-modal="true" aria-labelledby="modal-title" id="result-modal">
+        <button class="modal-close" id="modal-close" type="button" aria-label="Pencereyi kapat">×</button>
+        <div id="modal-content"></div>
+      </section>
+    </div>
+    <div class="toast" id="toast" role="status" aria-live="polite"></div>
+    <noscript><p>Tahlil defterini açmak için tarayıcıda JavaScript’i etkinleştir.</p></noscript>
+    <script type="module" src="app.js"></script>
+  </body>
+</html>
