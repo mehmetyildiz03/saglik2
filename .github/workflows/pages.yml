@@ -26,6 +26,7 @@ jobs:
           mkdir site
           cp index.html styles.css app.js domain.js reader.js favicon.svg site/
           cp -r assets vendor site/
+          printf '%s\n' "$GITHUB_SHA" > site/version.txt
       - uses: actions/upload-pages-artifact@7b1f4a764d45c48632c6b24a0339c27f5614fb0b # v4
         with:
           path: site
@@ -47,13 +48,19 @@ jobs:
         env:
           PAGE_URL: ${{ steps.deployment.outputs.page_url }}
         run: |
+          base="${PAGE_URL%/}"
           for attempt in {1..12}; do
-            if curl -fsSL --max-time 10 "${PAGE_URL%/}/" -o /tmp/denge-index.html &&
-               rg -q '<title>Denge' /tmp/denge-index.html &&
-               curl -fsSL --max-time 10 "${PAGE_URL%/}/app.js" -o /tmp/denge-app.js &&
-               rg -q 'denge.saglik2.v1' /tmp/denge-app.js; then
+            if curl -fsSL --max-time 10 "$base/version.txt?release=$GITHUB_SHA" -o /tmp/denge-version.txt &&
+               grep -Fxq "$GITHUB_SHA" /tmp/denge-version.txt &&
+               curl -fsSL --max-time 10 "$base/" -o /tmp/denge-index.html &&
+               grep -Fq '<title>Denge' /tmp/denge-index.html &&
+               curl -fsSL --max-time 10 "$base/app.js" -o /tmp/denge-app.js &&
+               grep -Fq 'denge.saglik2.v1' /tmp/denge-app.js; then
+              echo "Denge $GITHUB_SHA is live at $PAGE_URL"
               exit 0
             fi
+            echo "Waiting for Pages to serve the current commit (attempt $attempt of 12)."
             sleep 5
           done
+          echo "::error::Pages did not serve the expected version and assets at $PAGE_URL"
           exit 1
