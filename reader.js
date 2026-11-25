@@ -1,4 +1,4 @@
-import { parseReport } from "./domain.js";
+import { parseReport, parseValue } from "./domain.js";
 
 const pdfAssets = new URL("./vendor/pdf/", import.meta.url);
 const ocrAssets = new URL("./vendor/ocr/", import.meta.url);
@@ -6,6 +6,10 @@ const maxBytes = 20 * 1024 * 1024;
 const maxPages = 12;
 
 export class ReportReadError extends Error {}
+
+function hasReadableResults(text) {
+  return parseReport(text, 201).some(row => parseValue(row.value));
+}
 
 function pdfLines(items) {
   const fragments = items.filter(item => item.str?.trim()).map(item => ({
@@ -87,7 +91,7 @@ async function readPdf(file, reportProgress) {
       const page = await documentFile.getPage(number);
       const content = await page.getTextContent();
       const text = pdfLines(content.items);
-      const hasScans = !parseReport(text).length && (await page.getOperatorList()).fnArray.some(operation => imageOperations.has(operation));
+      const hasScans = !hasReadableResults(text) && (await page.getOperatorList()).fnArray.some(operation => imageOperations.has(operation));
       if (hasScans) {
         const viewport = page.getViewport({ scale: Math.min(2.4, 2500 / Math.max(page.view[2] - page.view[0], page.view[3] - page.view[1])) });
         const canvas = document.createElement("canvas");
@@ -96,13 +100,13 @@ async function readPdf(file, reportProgress) {
         await page.render({ canvasContext: canvas.getContext("2d"), viewport }).promise;
         worker ??= await createOcr(reportProgress);
         const scanned = (await worker.recognize(canvas)).data.text;
-        pages.push(parseReport(scanned).length ? scanned : text);
+        pages.push(hasReadableResults(scanned) ? scanned : text);
       } else {
         pages.push(text);
       }
       page.cleanup();
     }
-    return pages.join("\n");
+    return pages.join("\n\f\n");
   } finally {
     await worker?.terminate();
     await loading.destroy();

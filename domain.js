@@ -143,68 +143,138 @@ export function validDate(date) {
   return Number.isFinite(+value) && value.toISOString().slice(0, 10) === date;
 }
 
-export function reportDate(input) {
-  const labeled = [...input.matchAll(/(?:numune alma|örnek alma|tetkik|rapor|sonu[cç]|i[sş]lem)\s+tarihi\s*[: ]\s*(\d{1,2}[./-]\d{1,2}[./-]\d{4}|\d{4}-\d{2}-\d{2})/giu)];
-  const dates = new Set(labeled.map(match => {
-    if (validDate(match[1])) return match[1];
-    const [day, month, year] = match[1].split(/[./-]/);
-    return [year, month.padStart(2, "0"), day.padStart(2, "0")].join("-");
-  }).filter(validDate));
-  return dates.size === 1 ? [...dates][0] : "";
+const datePattern = "(?:\\d{4}-\\d{2}-\\d{2}|\\d{1,2}[./-]\\d{1,2}[./-]\\d{4})";
+const dateTimePattern = datePattern + "(?:\\s+\\d{1,2}:\\d{2}(?::\\d{2})?)?";
+const dateOnly = new RegExp("^(" + datePattern + ")$");
+const datedLine = new RegExp("^(" + datePattern + ")(?:\\s+\\d{1,2}:\\d{2}(?::\\d{2})?)?(?=$|[\\s;|])");
+const sampleDateTitle = "(?:numune|ornek)(?: alma)? (?:tarihi|zamani)";
+const testDateTitle = "(?:tahlil|tetkik|islem) tarihi|tarih";
+const reportDateTitle = "(?:rapor|sonuc|onay) tarihi";
+const dateTitles = [sampleDateTitle, testDateTitle, reportDateTitle];
+const dateHeading = new RegExp("(?<!\\S)(" + dateTitles.join("|") + ")\\s*[:=]?\\s*(" + dateTimePattern + ")(?=$|[\\s;|])", "g");
+const undatedHeading = new RegExp("^(" + dateTitles.join("|") + ")\\s*[:=]");
+const dateTitleRanks = dateTitles.map(title => new RegExp("^(?:" + title + ")$"));
+
+function readDate(text) {
+  const token = text.trim().split(/\s+/, 1)[0];
+  if (!dateOnly.test(token)) return "";
+  if (/^\d{4}-/.test(token)) return validDate(token) ? token : "";
+  const [day, month, year] = token.split(/[./-]/);
+  const date = [year, month.padStart(2, "0"), day.padStart(2, "0")].join("-");
+  return validDate(date) ? date : "";
+}
+
+function headingDates(line) {
+  const normalized = normalize(line);
+  const matches = [...normalized.matchAll(dateHeading)];
+  if (matches[0]?.index === 0) {
+    return matches.map(([, title, date]) => [dateTitleRanks.findIndex(pattern => pattern.test(title)), readDate(date)]);
+  }
+  const incomplete = normalized.match(undatedHeading);
+  return incomplete ? [[dateTitleRanks.findIndex(pattern => pattern.test(incomplete[1])), ""]] : [];
+}
+
+function dateInSection(candidates) {
+  const bestRank = Math.min(...candidates.map(([rank]) => rank));
+  const dates = new Set(candidates.filter(([rank]) => rank === bestRank).map(([, date]) => date));
+  return dates.size === 1 ? dates.values().next().value : "";
 }
 
 const numberPattern = "[-+−]?(?:\\d+(?:[.,]\\d+)?|[.,]\\d+)";
-const rangePattern = new RegExp(`^(${numberPattern})\\s*(?:[-–—]|ile)\\s*(${numberPattern})$`, "i");
-const limitPattern = new RegExp(`^([<>]=?|[≤≥])\\s*(${numberPattern})$`);
+const rangePattern = new RegExp("^(" + numberPattern + ")\\s*(?:[-–—]|ile)\\s*(" + numberPattern + ")$", "i");
+const limitPattern = new RegExp("^([<>]=?|[≤≥])\\s*(" + numberPattern + ")$");
 const aliasPatterns = [...aliases.keys()].sort((first, second) => second.length - first.length)
-  .map(key => new RegExp(`^${key.split(" ").join("[^a-z0-9%#]+")}(?=$|[^a-z0-9%#])`));
-const numericResultPattern = new RegExp(`^([<>]=?|[≤≥])?\\s*${numberPattern}(?=$|[^\\d.,])`);
+  .map(key => new RegExp("^" + key.split(" ").join("[^a-z0-9%#]+") + "(?=$|[^a-z0-9%#])"));
+const numericResultPattern = new RegExp("^([<>]=?|[≤≥])?\\s*" + numberPattern +
+  "(?=$|[\\s%]|[\\p{L}µμ]{1,8}/[\\p{L}µμ]{1,8}(?:\\s|$))", "u");
 const qualitativeResultPattern = /^(negatif|negative|pozitif|positive|non[- ]?reaktif|reaktif|saptanmadı|saptandı|eser|yok|var)(?=\s|$)/iu;
+const metadataName = /^(?:tarih|yas|cinsiyet|hasta|dogum|protokol|dosya|sonuc|kimlik|t\.?c\.?|barkod)(?:$|[\s:])/;
+const referenceAtEnd = new RegExp(
+  "(?:^|\\s)(\\(?\\s*(?:" + numberPattern + "\\s*(?:[-–—]|ile)\\s*" + numberPattern +
+  "|[<>≤≥]=?\\s*" + numberPattern + ")\\s*\\)?)$", "i",
+);
+const unitPattern = /^(?=.*[\p{L}%°])[\p{L}\d%μµ°/.*^·₀-₉¹²³⁴⁵⁶⁷⁸⁹-]{1,28}(?:\s*\/\s*[\p{L}]+)?$/u;
 
-function resultInLine(line) {
-  const input = line.trim().replace(/^[•*]\s*/, "");
-  const separators = /[;|\t]/;
-  const columns = input.split(separators).map(part => part.trim());
-  if (columns.length >= 2 && /\p{L}/u.test(columns[0])) {
-    const result = parseValue(columns[1]);
-    if (result) return { name: columns[0], result, tail: columns.slice(2).join(" ") };
-  }
+function resultWithTail(name, value, tail) {
+  if (typeof parseValue(value)?.value === "string") return { name, value, unit: "", reference: "" };
+  const remainder = tail.trim().replace(/^(?:[HL↑↓*]+)\s+/i, "").replace(/\s+(?:[HL↑↓*]+)$/i, "").trim();
+  const boundary = remainder.match(referenceAtEnd);
+  const reference = boundary ? boundary[1].replace(/[()]/g, "").trim() : "";
+  const unit = (boundary ? remainder.slice(0, boundary.index) : remainder).trim();
+  return { name, value, unit: unitPattern.test(unit) ? unit : "", reference };
+}
 
-  // Explicit names at the start keep dates, reference bounds and patient metadata out of the value.
-  const normalized = normalize(input);
+function structuredResult(input) {
+  const columns = input.split(/[;|\t]/).map(part => part.trim());
+  if (columns.length < 2 || columns.length > 5) return null;
+  const [name, value, unit = "", reference = "", rawDate] = columns;
+  if (!/\p{L}/u.test(name) || metadataName.test(normalize(name))) return null;
+  const reading = parseValue(value);
+  if (!measurement(name) && !reading) return null;
+  const fields = columns.length === 3 || typeof reading?.value === "string"
+    ? resultWithTail(name, value, unit)
+    : { name, value, unit, reference };
+  return { ...fields, date: rawDate === undefined ? undefined : readDate(rawDate) };
+}
+
+function resultInLine(input) {
+  const spaced = input.replace(/^[•*]\s*/, "");
+  const structured = structuredResult(spaced);
+  if (structured) return structured;
+
+  // Match the longest test name first so an abbreviation cannot swallow a more specific measurement.
+  const normalized = normalize(spaced);
   for (const pattern of aliasPatterns) {
     const match = normalized.match(pattern);
     if (!match) continue;
-    const tail = input.slice(match[0].length).replace(/^[\s:;|=)\]]+/, "").replace(/^\*\s*/, "");
-    const valueMatch = tail.match(numericResultPattern);
-    if (valueMatch) return { name: input.slice(0, match[0].length), result: parseValue(valueMatch[0]), tail: tail.slice(valueMatch[0].length) };
-    const wordMatch = tail.match(qualitativeResultPattern);
-    if (wordMatch) return { name: input.slice(0, match[0].length), result: parseValue(wordMatch[0]), tail: tail.slice(wordMatch[0].length) };
+    const name = spaced.slice(0, match[0].length);
+    const tail = spaced.slice(match[0].length).replace(/^[\s:;|=)\]]+/, "").replace(/^\*\s*/, "");
+    if (!tail) return resultWithTail(name, "", "");
+    const valueMatch = tail.match(numericResultPattern) || tail.match(qualitativeResultPattern) ||
+      tail.match(/^[\d.,<>≤≥±−+?–—-]\S*/);
+    if (valueMatch) return resultWithTail(name, valueMatch[0], tail.slice(valueMatch[0].length));
   }
   return null;
 }
 
-const referenceAtEnd = new RegExp(`(?:^|\\s)(\\(?\\s*(?:${numberPattern}\\s*(?:[-–—]|ile)\\s*${numberPattern}|[<>≤≥]=?\\s*${numberPattern})\\s*\\)?)$`, "i");
-
-export function parseReport(text) {
+export function parseReport(text, limit = Infinity) {
   const rows = [];
-  for (const line of text.split(/\r?\n/)) {
-    const entry = resultInLine(line);
-    if (!entry || !entry.result || entry.name.length > 100) continue;
-    if (/^(?:tarih|yaş|cinsiyet|hasta|doğum|protokol|dosya|sonuç|kimlik|tc\b|barkod)/i.test(normalize(entry.name))) continue;
+  let sectionDates = [];
+  let sectionHasResults = false;
+  for (const rawLine of text.replaceAll("\f", "\n\f\n").split(/\r?\n/)) {
+    if (rawLine.includes("\f")) {
+      sectionDates = [];
+      sectionHasResults = false;
+    }
+    const line = rawLine.trim().normalize("NFC");
+    if (!line) continue;
+    const headings = headingDates(line);
+    const prefix = line.match(datedLine);
+    const input = prefix ? line.slice(prefix[0].length).replace(/^[\s;|]+/, "") : line;
+    if (headings.length || (prefix && !input)) {
+      if (sectionHasResults) sectionDates = [];
+      sectionDates.push(...(headings.length ? headings : [[1, readDate(prefix[1])]]));
+      sectionHasResults = false;
+      continue;
+    }
+
+    const entry = resultInLine(input);
+    if (!entry || entry.name.length > 100) continue;
+    sectionHasResults = true;
     const info = measurement(entry.name);
-    const tail = entry.tail.trim().replace(/^(?:[HL↑↓*]+)\s+/i, "").replace(/\s+(?:[HL↑↓*]+)$/i, "").trim();
-    const ref = tail.match(referenceAtEnd);
-    const reference = ref ? ref[1].replace(/[()]/g, "").trim() : "";
-    const unit = (ref ? tail.slice(0, ref.index) : tail).trim();
-    const possibleUnit = /^[\p{L}\d%μµ°/.*^·₀-₉¹²³⁴⁵⁶⁷⁸⁹-]{1,28}(?:\s*\/\s*[\p{L}]+)?$/u.test(unit) ? unit : "";
+    const sectionDate = dateInSection(sectionDates);
+    const explicitDate = prefix ? readDate(prefix[1]) : entry.date;
     rows.push({
       name: info?.name || entry.name,
       system: info?.system || "other",
-      value: `${entry.result.qualifier}${entry.result.value}`,
-      unit: typeof entry.result.value === "number" ? possibleUnit : "",
-      reference: typeof entry.result.value === "number" ? reference : "",
+      value: entry.value,
+      unit: entry.unit,
+      reference: entry.reference,
+      date: explicitDate ?? sectionDate,
     });
+    // A new date on a single row makes the scope of the preceding section uncertain.
+    if (explicitDate !== undefined && explicitDate !== sectionDate) sectionDates = [];
+    if (rows.length >= limit) break;
   }
   return rows;
 }
@@ -235,8 +305,12 @@ export function statusOf(result) {
   return "in-range";
 }
 
+export function measurementKey(result) {
+  return [aliasKey(result.name), normalize(result.unit.replace(/\s/g, "")), typeof result.value].join("|");
+}
+
 export function metricKey(result) {
-  return [result.system, aliasKey(result.name), normalize(result.unit.replace(/\s/g, "")), typeof result.value].join("|");
+  return result.system + "|" + measurementKey(result);
 }
 
 export const statuses = { "in-range": "Aralıkta", low: "Aralığın altında", high: "Aralığın üstünde", "no-range": "—" };

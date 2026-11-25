@@ -1,6 +1,6 @@
 import {
-  demoResults, displayNumber, displayValue, knownNames, measurement, metricKey, normalize, parseReference,
-  parseReport, parseValue, referenceText, reportDate, statusOf, statuses, systemFor, systems, validDate,
+  demoResults, displayNumber, displayValue, knownNames, measurement, measurementKey, metricKey, normalize, parseReference,
+  parseReport, parseValue, referenceText, statusOf, statuses, systemFor, systems, validDate,
 } from "./domain.js";
 
 const icons = {
@@ -34,7 +34,15 @@ const shortDate = new Intl.DateTimeFormat("tr-TR", { day: "numeric", month: "sho
 const yearDate = new Intl.DateTimeFormat("tr-TR", { month: "short", year: "numeric", timeZone: "UTC" });
 const dateLabel = (date, formatter = fullDate) => formatter.format(new Date(date + "T00:00:00Z"));
 const today = () => new Intl.DateTimeFormat("sv-SE").format(new Date());
-const example = "Rapor tarihi: 13.11.2026\nHemoglobin 13,8 g/dL 12 – 16\nLDL kolesterol 136 mg/dL <130\nALT 24 U/L 7 – 40\nD vitamini 28 ng/mL 30 – 100\nTSH 2,2 mIU/L 0,4 – 4";
+const example = `Tahlil tarihi: 21.08.2026
+Hemoglobin 13,5 g/dL 12 – 16
+ALT 27 U/L 7 – 40
+
+Tahlil tarihi: 13.11.2026
+Hemoglobin 13,8 g/dL 12 – 16
+ALT 24 U/L 7 – 40
+D vitamini 28 ng/mL 30 – 100`;
+const reportLimit = 200;
 
 function loadState() {
   try {
@@ -54,9 +62,7 @@ let search = "";
 let toastTimer;
 let previousFocus;
 let modalRevision = 0;
-let pendingRows = [];
 let reportText = "";
-let draftDate = "";
 const viewIds = ["overview", "systems", "results"];
 
 const activeResults = () => state.demo ? demoResults : state.results;
@@ -334,9 +340,7 @@ function closeModal() {
   $("#modal-content").replaceChildren();
   $(".app-shell").inert = false;
   document.body.classList.remove("modal-open");
-  pendingRows = [];
   reportText = "";
-  draftDate = "";
   if (previousFocus?.isConnected) previousFocus.focus();
   else $("#main-content").focus({ preventScroll: true });
 }
@@ -408,7 +412,7 @@ function manualForm(result = null) {
         <input class="text-input" id="manual-name" name="name" list="test-names" maxlength="100" placeholder="Örneğin Hemoglobin" required value="${escape(result?.name)}">
         <datalist id="test-names">${knownNames.map(name => `<option value="${escape(name)}"></option>`).join("")}</datalist></div>
       <div><label class="field-label" for="manual-system">Analiz sistemi</label><select class="select-input" id="manual-system" name="system">${options(result?.system ?? "other")}</select></div>
-      <div><label class="field-label" for="manual-date">Tahlil tarihi</label><input class="text-input" id="manual-date" name="date" type="date" required value="${escape(result?.date || draftDate || today())}"></div>
+      <div><label class="field-label" for="manual-date">Tahlil tarihi</label><input class="text-input" id="manual-date" name="date" type="date" required value="${escape(result?.date || today())}"></div>
       <div><label class="field-label" for="manual-value">Sonuç</label><input class="text-input" id="manual-value" name="value" maxlength="32" required placeholder="13,8 veya Negatif" value="${result ? escape(displayValue(result)) : ""}"></div>
       <div><label class="field-label" for="manual-unit">Birim</label><input class="text-input" id="manual-unit" name="unit" maxlength="40" placeholder="g/dL" value="${escape(result?.unit)}"></div>
       <div class="wide"><label class="field-label" for="manual-reference">Rapordaki referans aralığı</label><input class="text-input" id="manual-reference" name="reference" maxlength="42" placeholder="12–16 veya &lt;130" value="${result ? escape(referenceText(result)) : ""}"></div>
@@ -419,7 +423,7 @@ function manualForm(result = null) {
   </form>`;
 }
 
-function makeResult(row, date, id = crypto.randomUUID()) {
+function makeResult(row, id) {
   const name = String(row.name || "").trim();
   const value = parseValue(row.value);
   const reference = parseReference(row.reference);
@@ -427,8 +431,8 @@ function makeResult(row, date, id = crypto.randomUUID()) {
   if (!value) throw new Error(`${name} için geçerli bir sonuç gir.`);
   if (!reference) throw new Error(`${name} için aralığı 12–16 veya <130 biçiminde gir.`);
   if (typeof value.value !== "number" && (reference.min !== null || reference.max !== null)) throw new Error(`${name} için sayısal referansı temizle.`);
-  if (!validDate(date)) throw new Error("Tahlil tarihini gir.");
-  return { id, name: measurement(name)?.name || name, system: systemFor(row.system).id, unit: String(row.unit || "").trim(), date, ...value, ...reference };
+  if (!validDate(row.date)) throw new Error("Tahlil tarihini gir.");
+  return { id, name: measurement(name)?.name || name, system: systemFor(row.system).id, unit: String(row.unit || "").trim(), date: row.date, ...value, ...reference };
 }
 
 function formStatus(message, error = false) {
@@ -448,7 +452,7 @@ function bindManual(result = null) {
     event.preventDefault();
     const fields = Object.fromEntries(new FormData(event.target));
     try {
-      const next = makeResult(fields, fields.date, result?.id);
+      const next = makeResult(fields, result?.id);
       saveResults([next], result);
     } catch (error) {
       formStatus(error.message, true);
@@ -479,24 +483,33 @@ function removeResult(id) {
   toast("Kayıt silindi.");
 }
 
-function sameResult(first, second) {
-  return metricKey(first) === metricKey(second) && first.date === second.date && first.value === second.value &&
-    first.qualifier === second.qualifier && referenceText(first) === referenceText(second);
+function readingKey(result) {
+  return JSON.stringify([measurementKey(result), result.date, result.value, result.qualifier || ""]);
+}
+
+function resultKey(result) {
+  return JSON.stringify([readingKey(result), result.min ?? null, result.max ?? null, !!result.minExclusive, !!result.maxExclusive]);
 }
 
 function saveResults(records, existing) {
-  if (existing && state.results.some(result => result.id !== existing.id && sameResult(records[0], result))) {
+  const current = loadState();
+  if (existing && !current.results.some(result => result.id === existing.id)) {
+    throw new Error("Bu kayıt başka bir sekmede kaldırılmış.");
+  }
+  const results = current.results.filter(result => result.id !== existing?.id);
+  const keys = new Set(results.map(resultKey));
+  if (existing && keys.has(resultKey(records[0]))) {
     throw new Error("Bu değer aynı tarih için zaten kayıtlı.");
   }
-  const results = state.results.filter(result => result.id !== existing?.id);
   let added = 0;
   for (const record of records) {
-    if (!results.some(result => sameResult(record, result))) {
-      results.push(record);
-      added++;
-    }
+    const key = resultKey(record);
+    if (keys.has(key)) continue;
+    keys.add(key);
+    results.push({ ...record, id: record.id ?? crypto.randomUUID() });
+    added++;
   }
-  if (!saveState({ ...state, demo: false, results })) return;
+  if (!saveState({ ...current, demo: false, results })) return;
   closeModal();
   filter = "all";
   search = "";
@@ -547,53 +560,175 @@ async function processFile(file) {
 
 function parseInput() {
   reportText = $("#report-text").value;
-  pendingRows = parseReport(reportText);
-  if (!pendingRows.length) {
-    formStatus("Ölçüm bulunamadı. Her satırda önce test adı, sonra sonuç olacak şekilde metni düzenleyebilir veya elle girebilirsin.", true);
-    return;
-  }
-  if (pendingRows.length > 200) {
+  const rows = parseReport(reportText, reportLimit + 1);
+  if (rows.length > reportLimit) {
     formStatus("Bir seferde en fazla 200 ölçüm ekleyebilirsin. Raporu birkaç parçaya ayır.", true);
     return;
   }
-  draftDate = reportDate(reportText);
-  renderPreview();
+  renderPreview(rows);
 }
 
-function renderPreview() {
-  openModal(`<h2 id="modal-title">Okunan sonuçları kontrol et</h2>
-    <p class="modal-intro">${pendingRows.length} ölçüm bulundu. Değerleri, birimleri ve referansları raporunla karşılaştır.</p>
-    <form id="preview-form">
-      <label class="field-label" for="report-date">Tahlil tarihi</label><input class="text-input date-input" id="report-date" type="date" required value="${escape(draftDate)}">
-      <div class="preview-rows">${pendingRows.map((row, index) => `
-        <fieldset class="preview-row" data-row="${index}"><legend>Ölçüm ${index + 1}</legend>
-          <button type="button" class="remove-row" data-action="remove-row" aria-label="${escape(row.name)} satırını çıkar">Çıkar</button>
-          <div class="form-grid">
-            <div><label class="field-label">Ölçüm adı<input class="text-input" data-field="name" maxlength="100" required value="${escape(row.name)}"></label></div>
-            <div><label class="field-label">Analiz sistemi<select class="select-input" data-field="system">${options(row.system)}</select></label></div>
-            <div><label class="field-label">Sonuç<input class="text-input" data-field="value" maxlength="32" required value="${escape(row.value)}"></label></div>
-            <div><label class="field-label">Birim<input class="text-input" data-field="unit" maxlength="40" value="${escape(row.unit)}"></label></div>
-            <div class="wide"><label class="field-label">Referans aralığı<input class="text-input" data-field="reference" maxlength="42" value="${escape(row.reference)}"></label></div>
-          </div>
-        </fieldset>`).join("")}</div>
-      <p class="parse-status" id="parse-status" role="status"></p>
-      <div class="form-actions"><button class="secondary-button" data-action="add" type="button">Metne dön</button>
-        <button class="primary-button" type="submit">Sonuçları kaydet</button></div>
+function previewRow(row = {}) {
+  return `<fieldset class="preview-row">
+    <legend>Ölçüm <span data-row-number></span></legend>
+    <button type="button" class="remove-row" data-action="remove-row">Çıkar</button>
+    <div class="form-grid">
+      <label class="field-label">Ölçüm adı<input class="text-input" data-field="name" list="preview-names" maxlength="100" required value="${escape(row.name)}"></label>
+      <label class="field-label">Tahlil tarihi<input class="text-input" data-field="date" type="date" required value="${escape(row.date)}"></label>
+      <label class="field-label">Sonuç<input class="text-input" data-field="value" maxlength="32" required value="${escape(row.value)}"></label>
+      <label class="field-label">Birim<input class="text-input" data-field="unit" maxlength="40" value="${escape(row.unit)}"></label>
+      <label class="field-label">Referans aralığı<input class="text-input" data-field="reference" maxlength="42" value="${escape(row.reference)}"></label>
+      <label class="field-label">Analiz sistemi<select class="select-input" data-field="system">${options(row.system ?? "other")}</select></label>
+    </div>
+    <p class="preview-note" hidden></p>
+  </fieldset>`;
+}
+
+function renderPreview(rows) {
+  openModal(`<h2 id="modal-title">Sonuçları kontrol et</h2>
+    <p class="modal-intro">${rows.length
+      ? "Tarihleri ve değerleri raporunla karşılaştır. Raporda yazıyorsa eksik birimleri ve aralıkları ekle."
+      : "Otomatik olarak ölçüm bulunamadı. Raporuna bakarak aşağıya bir ölçüm ekleyebilirsin."}</p>
+    <form id="preview-form" novalidate>
+      <datalist id="preview-names">${knownNames.map(name => `<option value="${escape(name)}"></option>`).join("")}</datalist>
+      <div class="preview-bulk" id="preview-bulk" hidden>
+        <label class="field-label" for="preview-bulk-date">Eksik tarihler için</label>
+        <div class="preview-bulk-controls">
+          <input class="text-input" id="preview-bulk-date" type="date">
+          <button class="secondary-button" data-action="fill-dates" type="button">Boş tarihleri doldur</button>
+        </div>
+      </div>
+      <div class="preview-rows" id="preview-rows">${(rows.length ? rows : [{}]).map(previewRow).join("")}</div>
+      <button class="link-button preview-add" data-action="append-row" type="button">${icon("plus")} Ölçüm ekle</button>
+      <div class="preview-footer">
+        <p class="preview-summary" id="preview-summary" aria-live="polite"></p>
+        <p class="parse-status" id="parse-status" role="status"></p>
+        <div class="form-actions"><button class="secondary-button" data-action="add" type="button">Metne dön</button>
+          <button class="primary-button" type="submit">Sonuçları kaydet</button></div>
+      </div>
     </form>`);
-  $("#preview-form").addEventListener("submit", event => {
-    event.preventDefault();
-    try {
-      const date = $("#report-date").value;
-      const records = [...document.querySelectorAll(".preview-row")].map(row => {
-        const fields = Object.fromEntries([...row.querySelectorAll("[data-field]")].map(input => [input.dataset.field, input.value]));
-        return makeResult(fields, date);
-      });
-      if (!records.length) throw new Error("Kaydetmek için en az bir ölçüm gerekli.");
-      saveResults(records);
-    } catch (error) {
-      formStatus(error.message, true);
-    }
+
+  const form = $("#preview-form");
+  form.addEventListener("input", syncPreview);
+  form.addEventListener("change", event => {
+    if (event.target.dataset.field !== "name") return;
+    const system = event.target.closest("fieldset").querySelector('[data-field="system"]');
+    const info = measurement(event.target.value);
+    if (system.value === "other" && info) system.value = info.system;
+    syncPreview();
   });
+  form.addEventListener("submit", event => {
+    event.preventDefault();
+    const { records, incomplete } = syncPreview();
+    if (incomplete) {
+      formStatus("İşaretli alanları düzelt veya ilgili ölçümü çıkar.", true);
+      form.querySelector('[aria-invalid="true"]').focus();
+      return;
+    }
+    if (!records.length) {
+      formStatus("Kaydetmek için en az bir ölçüm gerekli.", true);
+      return;
+    }
+    saveResults(records);
+  });
+  syncPreview();
+}
+
+function syncPreview() {
+  const saved = loadState().results;
+  const savedKeys = new Set(saved.map(resultKey));
+  const savedReadings = new Set(saved.map(readingKey));
+  const seen = new Set();
+  const records = [];
+  let repeated = 0;
+  let incomplete = 0;
+  let missingDate = false;
+
+  const rows = [...document.querySelectorAll(".preview-row")];
+  for (const [index, row] of rows.entries()) {
+    row.querySelector("[data-row-number]").textContent = index + 1;
+    const inputs = [...row.querySelectorAll("[data-field]")];
+    const fields = Object.fromEntries(inputs.map(input => [input.dataset.field, input.value]));
+    row.querySelector(".remove-row").setAttribute("aria-label", fields.name.trim()
+      ? fields.name.trim() + " satırını çıkar" : "Ölçüm " + (index + 1) + " satırını çıkar");
+    const value = parseValue(fields.value);
+    const reference = parseReference(fields.reference);
+    const numeric = typeof value?.value === "number";
+    const problems = {
+      name: !fields.name.trim(),
+      date: !validDate(fields.date),
+      value: !value,
+      reference: !reference || (!numeric && !!value && !!fields.reference.trim()),
+    };
+    missingDate ||= problems.date;
+    const needsInput = Object.values(problems).some(Boolean);
+    for (const input of inputs) {
+      if (problems[input.dataset.field]) input.setAttribute("aria-invalid", "true");
+      else input.removeAttribute("aria-invalid");
+    }
+
+    const messages = [];
+    if (needsInput) {
+      incomplete++;
+      messages.push("İşaretli alanları kontrol et.");
+    } else {
+      const record = makeResult(fields);
+      const key = resultKey(record);
+      records.push(record);
+      if (savedKeys.has(key) || seen.has(key)) {
+        repeated++;
+        messages.push(savedKeys.has(key) ? "Bu ölçüm defterde var." : "Bu ölçüm raporda tekrar ediyor.");
+      } else if (savedReadings.has(readingKey(record))) {
+        messages.push("Defterdeki eşleşmenin referans aralığı farklı.");
+      }
+      seen.add(key);
+    }
+
+    const missingUnit = numeric && !fields.unit.trim();
+    const missingReference = numeric && !fields.reference.trim();
+    row.querySelector('[data-field="unit"]').classList.toggle("check-field", missingUnit);
+    row.querySelector('[data-field="reference"]').classList.toggle("check-field", missingReference);
+    if (missingUnit && missingReference) messages.push("Birim ve aralık boş.");
+    else if (missingUnit) messages.push("Birim boş.");
+    else if (missingReference) messages.push("Referans aralığı boş.");
+    const note = row.querySelector(".preview-note");
+    note.hidden = !messages.length;
+    note.textContent = messages.join(" ");
+  }
+
+  $("#preview-bulk").hidden = !missingDate;
+  const summary = [records.length - repeated + " yeni"];
+  if (repeated) summary.push(repeated + " tekrar");
+  if (incomplete) summary.push(incomplete + " kontrol gerekli");
+  const summaryText = summary.join(" · ");
+  if ($("#preview-summary").textContent !== summaryText) $("#preview-summary").textContent = summaryText;
+  if (!incomplete) formStatus("");
+  return { records, incomplete };
+}
+
+function appendPreviewRow() {
+  const container = $("#preview-rows");
+  if (container.children.length >= reportLimit) {
+    formStatus("Bir seferde en fazla 200 ölçüm ekleyebilirsin.", true);
+    return;
+  }
+  container.insertAdjacentHTML("beforeend", previewRow());
+  syncPreview();
+  container.lastElementChild.querySelector('[data-field="name"]').focus();
+}
+
+function fillPreviewDates() {
+  const dateInput = $("#preview-bulk-date");
+  if (!validDate(dateInput.value)) {
+    formStatus("Boş tarihler için kullanacağın tarihi seç.", true);
+    dateInput.focus();
+    return;
+  }
+  for (const input of document.querySelectorAll('.preview-row [data-field="date"]')) {
+    if (!input.value) input.value = dateInput.value;
+  }
+  syncPreview();
+  $("#preview-form button[type=submit]").focus({ preventScroll: true });
 }
 
 function startQuest() {
@@ -628,7 +763,16 @@ document.addEventListener("click", event => {
     case "delete": removeResult(button.dataset.id); break;
     case "toggle-demo": toggleDemo(); break;
     case "quest": startQuest(); break;
-    case "remove-row": button.closest("fieldset").remove(); break;
+    case "append-row": appendPreviewRow(); break;
+    case "fill-dates": fillPreviewDates(); break;
+    case "remove-row": {
+      const row = button.closest("fieldset");
+      const nextButton = (row.nextElementSibling || row.previousElementSibling)?.querySelector(".remove-row");
+      row.remove();
+      syncPreview();
+      (nextButton || $('[data-action="append-row"]')).focus();
+      break;
+    }
     case "system-tab":
       systemId = button.dataset.system;
       renderSystems();
@@ -653,7 +797,8 @@ document.addEventListener("keydown", event => {
   if ($("#modal-backdrop").hidden) return;
   if (event.key === "Escape") closeModal();
   if (event.key !== "Tab") return;
-  const focusable = [...$("#result-modal").querySelectorAll("button:not(:disabled), input:not(:disabled), select, textarea")];
+  const focusable = [...$("#result-modal").querySelectorAll("button:not(:disabled), input:not(:disabled), select, textarea")]
+    .filter(element => element.getClientRects().length > 0);
   const target = event.shiftKey ? focusable[0] : focusable.at(-1);
   if (document.activeElement === target) {
     event.preventDefault();
