@@ -1,7 +1,8 @@
 import {
-  compareMeasurements, demoResults, displayNumber, displayValue, knownNames, measurement, measurementKey, metricKey, normalize, parseReference,
-  parseReport, parseValue, referenceText, statusOf, statuses, systemFor, systems, validDate,
+  compareMeasurements, demoResults, displayNumber, displayValue, knownNames, measurement, metricKey, normalize, parseReference,
+  parseReport, parseValue, readingKey, referenceText, resultKey, statusOf, statuses, systemFor, systems, validDate,
 } from "./domain.js";
+import { makeBackup, planRestore, readBackup } from "./backup.js";
 
 const icons = {
   home: '<path d="m3 10 9-7 9 7v10a1 1 0 0 1-1 1h-5v-7H9v7H4a1 1 0 0 1-1-1Z"/>',
@@ -20,6 +21,8 @@ const icons = {
   sparkle: '<path d="M12 2c0 6 4 10 10 10-6 0-10 4-10 10 0-6-4-10-10-10 6 0 10-4 10-10Z"/>',
   star: '<path d="m12 2 3.1 6.3 6.9 1-5 4.9 1.2 6.9-6.2-3.3-6.2 3.3 1.2-6.9-5-4.9 6.9-1z"/>',
   upload: '<path d="M12 16V3m-5 5 5-5 5 5M4 16v5h16v-5"/>',
+  download: '<path d="M12 3v13m-5-5 5 5 5-5M4 16v5h16v-5"/>',
+  phone: '<rect x="6" y="2" width="12" height="20" rx="3"/><path d="M11 18h2"/>',
   lock: '<rect x="5" y="10" width="14" height="11" rx="2"/><path d="M8 10V7a4 4 0 0 1 8 0v3m-4 5v2"/>',
   calendar: '<rect x="3" y="5" width="18" height="16" rx="3"/><path d="M7 3v4m10-4v4M3 10h18"/>',
 };
@@ -65,6 +68,9 @@ let toastTimer;
 let previousFocus;
 let modalRevision = 0;
 let reportText = "";
+let installPrompt;
+let offlineRegistration;
+let activatingRelease = false;
 const viewIds = ["overview", "systems", "results"];
 
 const activeResults = () => state.demo ? demoResults : state.results;
@@ -354,7 +360,11 @@ function renderResults() {
   const dates = resultDates();
   $("#view-results").innerHTML = `
     <div class="page-heading notebook-heading"><div><h1>Tahlil defterim</h1><p>${state.demo ? "Örnek sonuçları incele veya kendi sonuçlarını ekle." : "Kayıtlarını tarih, ölçüm adı ve analiz sistemine göre bul."}</p></div>
-      ${dates.length > 1 ? `<button class="secondary-button compare-button" data-action="compare" type="button">${icon("calendar")} Tarihleri karşılaştır</button>` : ""}</div>
+      <div class="notebook-actions">
+        ${dates.length > 1 ? `<button class="secondary-button compare-button" data-action="compare" type="button">${icon("calendar")} Tarihleri karşılaştır</button>` : ""}
+        <button class="secondary-button" data-action="backup" type="button">${icon("download")} Yedekle</button>
+      </div>
+    </div>
     <div class="filter-row"><input class="text-input search-input" type="search" id="result-search" aria-label="Tahlil ara" placeholder="Ölçüm ara" value="${escape(search)}">
       <select id="system-filter" class="select-filter" aria-label="Sisteme göre filtrele">
         <option value="all">Tüm sistemler</option>${systems.map(system => `<option value="${system.id}" ${filter === system.id ? "selected" : ""}>${system.name}</option>`).join("")}
@@ -368,6 +378,106 @@ function renderResults() {
 
 function resultDates() {
   return [...new Set(activeResults().map(result => result.date))].sort().reverse();
+}
+
+function downloadBackup() {
+  try {
+    const notebook = loadState();
+    if (!notebook.results.length) {
+      formStatus("Yedeklenecek kişisel ölçüm yok.", true);
+      return;
+    }
+    const url = URL.createObjectURL(new Blob([makeBackup(notebook)], { type: "application/json" }));
+    const link = document.createElement("a");
+    link.href = url;
+    link.download = `denge-yedek-${today()}.json`;
+    $("#modal-content").append(link);
+    link.click();
+    link.remove();
+    setTimeout(() => URL.revokeObjectURL(url), 30000);
+  } catch (error) {
+    formStatus(error.message, true);
+  }
+}
+
+function showBackup() {
+  const count = loadState().results.length;
+  openModal(`<h2 id="modal-title">Defter yedeği</h2>
+    <p class="modal-intro">Kişisel ölçümlerini ve favorilerini tek dosyada taşı.</p>
+    <div class="backup-sections">
+      <section>
+        <h3>Yedek indir</h3>
+        <p>${count ? `${count} kişisel ölçüm dosyaya aktarılacak. Sağlık verisi içeren bu dosyayı güvende sakla.` : "Kişisel defterine bir ölçüm eklediğinde yedek indirebilirsin."}</p>
+        <button class="secondary-button" id="download-backup" type="button" ${count ? "" : "disabled"}>${icon("download")} Yedeği indir</button>
+      </section>
+      <section>
+        <h3>Geri yükle</h3>
+        <p>Bir Denge yedeği seçip eklenecek kayıtları kontrol et.</p>
+        <label class="secondary-button backup-file-label" for="backup-file">${icon("upload")} Yedek dosyası seç
+          <input id="backup-file" type="file" accept=".json,application/json">
+        </label>
+        <p id="backup-filename" hidden></p>
+        <div id="backup-summary" class="backup-summary" role="status" hidden></div>
+        <button class="primary-button" id="restore-backup" type="button" hidden>Yedeği geri yükle</button>
+      </section>
+    </div>
+    <p class="parse-status" id="parse-status" role="status"></p>`);
+
+  let backup;
+  const fileInput = $("#backup-file");
+  const filename = $("#backup-filename");
+  const summary = $("#backup-summary");
+  const restore = $("#restore-backup");
+  $("#download-backup").addEventListener("click", downloadBackup);
+
+  function displayPlan(plan) {
+    summary.hidden = false;
+    summary.innerHTML = `<span><strong>${plan.records.length}</strong> eklenecek ölçüm</span>
+      <span><strong>${plan.repeated}</strong> tekrar</span><span><strong>${plan.favorites.length}</strong> eklenecek favori</span>`;
+    restore.hidden = !plan.records.length && !plan.favorites.length;
+  }
+
+  fileInput.addEventListener("change", async () => {
+    const revision = ++modalRevision;
+    backup = null;
+    summary.hidden = true;
+    restore.hidden = true;
+    formStatus("");
+    const file = fileInput.files[0];
+    filename.hidden = !file;
+    filename.textContent = file?.name ?? "";
+    if (!file) return;
+    if (file.size > 20 * 1024 * 1024) {
+      formStatus("20 MB veya daha küçük bir Denge yedeği seç.", true);
+      return;
+    }
+    try {
+      const text = await file.text();
+      if (revision !== modalRevision) return;
+      backup = readBackup(text);
+      displayPlan(planRestore(loadState(), backup));
+    } catch (error) {
+      if (revision === modalRevision) formStatus(error.message, true);
+    }
+  });
+
+  restore.addEventListener("click", () => {
+    if (!backup) return;
+    const current = loadState();
+    const plan = planRestore(current, backup);
+    if (!plan.records.length && !plan.favorites.length) {
+      displayPlan(plan);
+      return;
+    }
+    const results = current.results.concat(plan.records.map(record => ({ ...record, id: crypto.randomUUID() })));
+    const favorites = { ...current.favorites, personal: [...(current.favorites?.personal ?? []), ...plan.favorites] };
+    if (!saveState({ ...current, results, favorites, demo: false })) return;
+    closeModal();
+    filter = "all";
+    search = "";
+    navigate("results");
+    toast(`Yedek geri yüklendi · ${plan.records.length} ölçüm, ${plan.favorites.length} favori eklendi.`);
+  });
 }
 
 function showComparison() {
@@ -486,7 +596,67 @@ function about() {
       <div class="about-item"><span>${icon("activity")}</span><div><strong>Grafiğini oku</strong><p>Her nokta bir ölçümdür. Yeşil alan, grafikteki ölçümlerin ortak referans aralığını gösterir. Aralık rapordan alınır.</p></div></div>
       <div class="about-item"><span>${icon("sparkle")}</span><div><strong>Bir yıldız kazan</strong><p>Üç farklı ölçümün geçmişini keşfederek mini görevi tamamla.</p></div></div>
       <div class="about-item"><span>${icon("lock")}</span><div><strong>Kayıtların cihazında</strong><p>Dosya okuma tarayıcıda yapılır. Tarayıcı verilerini temizlersen defterin de silinir.</p></div></div>
+      <div class="about-item"><span>${icon("phone")}</span><div><strong>Telefonda Denge</strong>
+        <button class="link-button" data-action="install" type="button">Ana ekrana ekle ${icon("arrow")}</button></div></div>
     </div>`);
+}
+
+function showInstall() {
+  const installed = window.matchMedia("(display-mode: standalone)").matches || navigator.standalone;
+  openModal(`<h2 id="modal-title">Denge’yi ana ekrana ekle</h2>
+    <p class="modal-intro">Simgeye dokunarak tahlil defterini aç.</p>
+    ${installed ? '<p class="install-state">Denge şu anda ana ekrandan açık.</p>' : `
+      <div class="about-content">
+        <div class="about-item"><span>${icon("phone")}</span><div><strong>iPhone ve iPad</strong><p>Safari’de Paylaş menüsünü aç ve Ana Ekrana Ekle’yi seç.</p></div></div>
+        <div class="about-item"><span>${icon("phone")}</span><div><strong>Android</strong><p>Chrome menüsünde Ana ekrana ekle veya Uygulamayı yükle seçeneğini kullan.</p></div></div>
+      </div>
+      <div class="form-actions"><button class="primary-button" id="install-app" type="button" ${installPrompt ? "" : "hidden"}>Denge’yi yükle</button></div>`}
+    <p class="install-state" id="offline-state" role="status"></p>
+    <p class="page-note">Çevrimdışıyken defteri açabilir, grafiklere bakabilir ve elle ölçüm ekleyebilirsin. PDF ve fotoğraf okumak için internete bağlan.</p>`);
+  $("#install-app")?.addEventListener("click", async () => {
+    const prompt = installPrompt;
+    if (!prompt) return;
+    installPrompt = null;
+    updateOfflineUI();
+    try {
+      await prompt.prompt();
+    } catch {
+      toast("Kurulum için tarayıcının menüsünü kullanabilirsin.");
+    }
+  });
+  updateOfflineUI();
+}
+
+function updateOfflineUI() {
+  const controlled = Boolean(navigator.serviceWorker?.controller);
+  $("#offline-banner").hidden = navigator.onLine || !controlled;
+  $("#update-banner").hidden = !controlled || !offlineRegistration?.waiting;
+  const status = $("#offline-state");
+  if (status) status.textContent = controlled ? "Çevrimdışı kullanım hazır." : "Çevrimdışı kullanımı hazırlamak için Denge’yi internete bağlıyken aç.";
+  const install = $("#install-app");
+  if (install) install.hidden = !installPrompt;
+}
+
+async function registerOffline() {
+  if (!navigator.serviceWorker) return;
+  navigator.serviceWorker.addEventListener("controllerchange", () => {
+    if (activatingRelease) location.reload();
+    else updateOfflineUI();
+  });
+  try {
+    offlineRegistration = await navigator.serviceWorker.getRegistration();
+    if (!offlineRegistration || navigator.onLine) {
+      offlineRegistration = await navigator.serviceWorker.register("./sw.js", { updateViaCache: "none" });
+    }
+    const watchInstallation = () => {
+      offlineRegistration.installing?.addEventListener("statechange", updateOfflineUI);
+    };
+    offlineRegistration.addEventListener("updatefound", watchInstallation);
+    watchInstallation();
+    updateOfflineUI();
+  } catch {
+    // The notebook can still run in this tab when service workers are unavailable.
+  }
 }
 
 function showDetail(id) {
@@ -494,8 +664,9 @@ function showDetail(id) {
   if (!result) return;
   const key = metricKey(result);
   const history = activeResults().filter(item => metricKey(item) === key).sort((a, b) => a.date.localeCompare(b.date));
-  if (!state.discoveries.includes(key) && state.discoveries.length < 3) {
-    if (saveState({ ...state, discoveries: [...state.discoveries, key] })) {
+  const current = loadState();
+  if (!current.discoveries.includes(key) && current.discoveries.length < 3) {
+    if (saveState({ ...current, discoveries: [...current.discoveries, key] })) {
       renderQuest();
       toast(state.discoveries.length === 3 ? "✦ Keşif görevi tamamlandı!" : "✦ Bir keşif yıldızı kazandın.");
     }
@@ -626,18 +797,11 @@ function confirmDelete(id) {
 
 function removeResult(id) {
   if (state.demo || !state.results.some(result => result.id === id)) return;
-  if (!saveState({ ...state, results: state.results.filter(result => result.id !== id) })) return;
+  const current = loadState();
+  if (!saveState({ ...current, results: current.results.filter(result => result.id !== id) })) return;
   closeModal();
   render();
   toast("Kayıt silindi.");
-}
-
-function readingKey(result) {
-  return JSON.stringify([measurementKey(result), result.date, result.value, result.qualifier || ""]);
-}
-
-function resultKey(result) {
-  return JSON.stringify([readingKey(result), result.min ?? null, result.max ?? null, !!result.minExclusive, !!result.maxExclusive]);
 }
 
 function saveResults(records, existing) {
@@ -888,7 +1052,7 @@ function startQuest() {
 }
 
 function toggleDemo() {
-  if (!saveState({ ...state, demo: !state.demo })) return;
+  if (!saveState({ ...loadState(), demo: !state.demo })) return;
   filter = "all";
   search = "";
   render();
@@ -914,6 +1078,8 @@ document.addEventListener("click", event => {
     case "detail": showDetail(button.dataset.id); break;
     case "favorite": toggleFavorite(button.dataset.id); break;
     case "compare": showComparison(); break;
+    case "backup": showBackup(); break;
+    case "install": showInstall(); break;
     case "edit": editResult(button.dataset.id); break;
     case "confirm-delete": confirmDelete(button.dataset.id); break;
     case "delete": removeResult(button.dataset.id); break;
@@ -940,6 +1106,11 @@ document.addEventListener("click", event => {
 
 window.addEventListener("hashchange", () => {
   view = viewIds.includes(location.hash.slice(1)) ? location.hash.slice(1) : "overview";
+  render();
+});
+window.addEventListener("storage", event => {
+  if (event.key !== storageKey && event.key !== null) return;
+  state = loadState();
   render();
 });
 
@@ -973,5 +1144,26 @@ for (const button of document.querySelectorAll(".main-nav button, .mobile-nav bu
   button.querySelector("span").innerHTML = icon(navigationIcons[button.dataset.view]);
 }
 $(".privacy-note > span:first-child").innerHTML = icon("lock");
+window.addEventListener("online", updateOfflineUI);
+window.addEventListener("offline", updateOfflineUI);
+window.addEventListener("beforeinstallprompt", event => {
+  event.preventDefault();
+  installPrompt = event;
+  updateOfflineUI();
+});
+window.addEventListener("appinstalled", () => {
+  installPrompt = null;
+  updateOfflineUI();
+  toast("Denge ana ekranına eklendi.");
+});
+$("#apply-update").addEventListener("click", () => {
+  const waiting = offlineRegistration?.waiting;
+  if (!waiting) return;
+  activatingRelease = true;
+  $("#apply-update").disabled = true;
+  waiting.postMessage("activate-release");
+});
 view = viewIds.includes(location.hash.slice(1)) ? location.hash.slice(1) : "overview";
 render();
+updateOfflineUI();
+registerOffline();

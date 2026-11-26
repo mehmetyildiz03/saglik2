@@ -29,6 +29,13 @@ Belirsiz tarihler kontrol ekranında boş bırakılır. Örneğin bir PDF sayfas
 
 Raporlar tarayıcıda okunur. Kaydedilen ölçümler bu tarayıcının yerel depolama alanında durur. Tarayıcı verilerini silersen defter de silinir. Örnek veriler kişisel deftere eklenmez.
 
+## Yedekleme ve çevrimdışı kullanım
+
+- **Tahlil defterim → Yedekle → Yedeği indir** ile kişisel ölçümlerini ve favorilerini bir JSON dosyasında saklayabilirsin. Dosya sağlık verisi içerir.
+- Diğer cihazda veya tarayıcıda Denge’yi açıp **Yedekle** ekranından dosyanı seç. Kaç ölçüm ve favorinin ekleneceğini kontrol edip **Yedeği geri yükle**’ye dokun. Mevcut kayıtlarınla aynı ölçümler tekrar eklenmez.
+- Mobil tarayıcının menüsünden Denge’yi ana ekranına ekleyebilirsin. iPhone ve iPad’de Safari’nin **Paylaş → Ana Ekrana Ekle** seçeneğini kullan.
+- Denge’yi bir kez internete bağlıyken açtıktan sonra defter, grafikler, elle ölçüm ekleme ve yedekleme çevrimdışı çalışır. PDF ve fotoğraf okumak için internet gerekir.
+
 ## Geliştirme
 
 Statik siteyi çalıştırmak için deponun kök dizininde aşağıdaki komutu çalıştırıp `http://localhost:8000` adresini aç.
@@ -39,7 +46,7 @@ python3 -m http.server 8000
 
 Sitenin bir derleme adımı yok. GitHub Actions içindeki **Publish Denge** akışı `main` güncellemelerinde siteyi yayımlar. Aynı akış **Run workflow** üzerinden elle de çalıştırılabilir.
 
-Rapor okuma ve karşılaştırma kontrollerini Node.js 24 veya üzeri ile çalıştırabilirsin.
+Rapor okuma, karşılaştırma ve yedekleme kontrollerini Node.js 24 veya üzeri ile çalıştırabilirsin.
 
 ```sh
 node --test tests/*.test.mjs

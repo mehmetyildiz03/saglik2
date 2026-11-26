@@ -7,6 +7,8 @@
     <meta name="description" content="Tahlil sonuçlarını anlaşılır kartlar ve kişisel grafiklerle takip et. Verilerin cihazında kalır." />
     <title>Denge — Sağlığını keşfet</title>
     <link rel="icon" href="favicon.svg" type="image/svg+xml" />
+    <link rel="manifest" href="manifest.webmanifest" />
+    <link rel="apple-touch-icon" href="assets/denge-icon-192.png" />
     <link rel="stylesheet" href="styles.css" />
   </head>
   <body>
@@ -44,6 +46,11 @@
           <button class="text-button" id="about-button" type="button"><span class="help-mark">?</span> Denge nasıl çalışır?</button>
           <button class="primary-button top-add" id="add-result-button" type="button"><span aria-hidden="true">＋</span> Tahlil ekle</button>
         </header>
+        <div class="connection-banner" id="offline-banner" role="status" hidden>Çevrimdışısın. Defterini ve grafiklerini açabilirsin.</div>
+        <div class="connection-banner" id="update-banner" hidden>
+          <span>Denge’nin yeni sürümü hazır.</span>
+          <button class="link-button" id="apply-update" type="button">Yeni sürümü aç</button>
+        </div>
 
         <main id="main-content" tabindex="-1">
           <div id="view-overview" class="view active-view"></div>

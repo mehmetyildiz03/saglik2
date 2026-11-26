@@ -116,6 +116,9 @@ async function readPdf(file, reportProgress) {
 export async function readReportFile(file, reportProgress) {
   if (!file.size) throw new ReportReadError("Bu dosya boş.");
   if (file.size > maxBytes) throw new ReportReadError("20 MB veya daha küçük bir dosya seç.");
+  if (!navigator.onLine && /\.(?:pdf|jpg|jpeg|png|webp)$/i.test(file.name)) {
+    throw new ReportReadError("PDF ve fotoğraf okumak için internete bağlan. İstersen rapor metnini yapıştır veya elle ölçüm ekle.");
+  }
   if (/\.pdf$/i.test(file.name)) return readPdf(file, reportProgress);
   if (/\.(?:jpg|jpeg|png|webp)$/i.test(file.name)) return recognizeImage(file, reportProgress);
   if (/\.(?:txt|tsv|csv)$/i.test(file.name)) return file.text();

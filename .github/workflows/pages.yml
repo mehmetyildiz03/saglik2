@@ -24,8 +24,10 @@ jobs:
       - name: Prepare static site
         run: |
           mkdir site
-          cp index.html styles.css app.js domain.js reader.js favicon.svg site/
+          cp index.html styles.css app.js domain.js backup.js reader.js favicon.svg manifest.webmanifest sw.js site/
           cp -r assets vendor site/
+          sed -i "s/^const RELEASE = \"dev\";/const RELEASE = \"$GITHUB_SHA\";/" site/sw.js
+          grep -Fxq "const RELEASE = \"$GITHUB_SHA\";" site/sw.js
           printf '%s\n' "$GITHUB_SHA" > site/version.txt
       - uses: actions/upload-pages-artifact@7b1f4a764d45c48632c6b24a0339c27f5614fb0b # v4
         with:
@@ -55,7 +57,11 @@ jobs:
                curl -fsSL --max-time 10 "$base/" -o /tmp/denge-index.html &&
                grep -Fq '<title>Denge' /tmp/denge-index.html &&
                curl -fsSL --max-time 10 "$base/app.js" -o /tmp/denge-app.js &&
-               grep -Fq 'denge.saglik2.v1' /tmp/denge-app.js; then
+               grep -Fq 'denge.saglik2.v1' /tmp/denge-app.js &&
+               curl -fsSL --max-time 10 "$base/sw.js?release=$GITHUB_SHA" -o /tmp/denge-sw.js &&
+               grep -Fxq "const RELEASE = \"$GITHUB_SHA\";" /tmp/denge-sw.js &&
+               curl -fsSL --max-time 10 "$base/manifest.webmanifest" -o /tmp/denge-manifest.json &&
+               grep -Fq '"display": "standalone"' /tmp/denge-manifest.json; then
               echo "Denge $GITHUB_SHA is live at $PAGE_URL"
               exit 0
             fi

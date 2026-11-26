@@ -309,6 +309,14 @@ export function measurementKey(result) {
   return [aliasKey(result.name), normalize(result.unit.replace(/\s/g, "")), typeof result.value].join("|");
 }
 
+export function readingKey(result) {
+  return JSON.stringify([measurementKey(result), result.date, result.value, result.qualifier || ""]);
+}
+
+export function resultKey(result) {
+  return JSON.stringify([readingKey(result), result.min ?? null, result.max ?? null, !!result.minExclusive, !!result.maxExclusive]);
+}
+
 export function metricKey(result) {
   return result.system + "|" + measurementKey(result);
 }
