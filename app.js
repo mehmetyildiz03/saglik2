@@ -69,7 +69,8 @@ let state = loadState();
 let view = "overview";
 let systemId = "blood";
 let filter = "all";
-let resultDateFilter = "";
+let resultStart = "";
+let resultEnd = "";
 let search = "";
 let systemSearch = "";
 let toastTimer;
@@ -370,18 +371,38 @@ function renderSystemMetrics() {
 }
 
 function resultList() {
+  const query = normalize(search.trim());
+  const known = measurement(query);
+  const invalidDates = resultStart && resultEnd && resultStart > resultEnd;
   const results = activeResults()
-    .filter(result => (!resultDateFilter || result.date === resultDateFilter) &&
-      (filter === "all" || filter === result.system) && normalize(result.name).includes(normalize(search.trim())))
+    .filter(result => (!resultStart || result.date >= resultStart) && (!resultEnd || result.date <= resultEnd) &&
+      (filter === "all" || filter === result.system) &&
+      (normalize(result.name).includes(query) || result.name === known?.name))
     .sort((a, b) => b.date.localeCompare(a.date) || a.name.localeCompare(b.name, "tr"));
   $("#result-count").textContent = `${results.length} sonuç`;
-  $("#result-list").innerHTML = results.length ? results.map(result => `
+  $("#result-date-reset").hidden = !resultStart && !resultEnd;
+  const dateLabelText = resultStart === resultEnd && resultStart ? dateLabel(resultStart)
+    : [resultStart ? "Başlangıç " + dateLabel(resultStart) : "", resultEnd ? "Bitiş " + dateLabel(resultEnd) : ""].filter(Boolean).join(" · ");
+  $("#result-date-label").textContent = dateLabelText;
+  const groups = new Map();
+  for (const record of results) {
+    if (!groups.has(record.date)) groups.set(record.date, []);
+    groups.get(record.date).push(record);
+  }
+  $("#result-list").innerHTML = groups.size ? [...groups].map(([date, records]) => `
+    <section class="result-day" aria-labelledby="result-day-${date}"><div class="result-day-heading">
+      <h2 id="result-day-${date}"><time datetime="${date}">${dateLabel(date)}</time></h2><span>${records.length} sonuç</span>
+    </div><div class="result-day-list">${records.map(result => `
     <button class="section-card result-line" data-action="detail" data-id="${escape(result.id)}" type="button">
-      <span class="result-line-name"><strong>${escape(result.name)}</strong><span>${escape(dateLabel(result.date))}</span></span>
+      <span class="result-line-name"><strong>${escape(result.name)}</strong></span>
       <span class="result-line-system">${systemFor(result.system).name}</span>
       <span class="result-line-value">${escape(displayValue(result))} <span>${escape(result.unit)}</span></span>
       ${badge(result) || '<span class="result-line-arrow">' + icon("arrow") + '</span>'}
-    </button>`).join("") : emptyState("Sonuç bulunamadı", "Başka bir ölçüm ara veya defterine bir tahlil ekle.");
+    </button>`).join("")}</div></section>`).join("")
+    : invalidDates ? '<p class="result-filter-message" role="status">Bitiş tarihi başlangıçtan önce olamaz.</p>'
+      : (query || filter !== "all" || resultStart || resultEnd)
+        ? '<p class="result-filter-message">Bu filtrelerle eşleşen kayıt yok.</p>'
+        : emptyState("Sonuç bulunamadı", "Defterine bir tahlil ekleyerek ölçümlerini takip et.");
 }
 
 function renderResults() {
@@ -399,11 +420,27 @@ function renderResults() {
         <option value="all">Tüm sistemler</option>${systems.map(system => `<option value="${system.id}" ${filter === system.id ? "selected" : ""}>${system.name}</option>`).join("")}
       </select><span id="result-count" aria-live="polite"></span>
     </div>
-    ${resultDateFilter ? `<div class="result-date-chip"><span>${dateLabel(resultDateFilter)}</span>
-      <button class="link-button" data-action="clear-result-date" type="button">Tüm tarihleri gör</button></div>` : ""}
+    <div class="result-date-controls">
+      <details class="result-date-filter">
+        <summary>Tarih aralığı <span id="result-date-label"></span></summary>
+        <div class="form-grid">
+          <label class="field-label">Başlangıç<input class="text-input" id="result-start" type="date" value="${escape(resultStart)}"></label>
+          <label class="field-label">Bitiş<input class="text-input" id="result-end" type="date" value="${escape(resultEnd)}"></label>
+        </div>
+      </details>
+      <button class="link-button" id="result-date-reset" data-action="clear-result-date" type="button" hidden>Tüm tarihleri gör</button>
+    </div>
     <div class="all-results-list" id="result-list"></div>`;
   $("#result-search").addEventListener("input", event => { search = event.target.value; resultList(); });
   $("#system-filter").addEventListener("change", event => { filter = event.target.value; resultList(); });
+  $("#result-start").addEventListener("input", event => {
+    resultStart = validDate(event.target.value) ? event.target.value : "";
+    resultList();
+  });
+  $("#result-end").addEventListener("input", event => {
+    resultEnd = validDate(event.target.value) ? event.target.value : "";
+    resultList();
+  });
   resultList();
 }
 
@@ -672,7 +709,8 @@ function showBackup() {
     closeModal();
     filter = "all";
     search = "";
-    resultDateFilter = "";
+    resultStart = "";
+    resultEnd = "";
     navigate("results");
     const restored = [[plan.records.length, "ölçüm"], [plan.favorites.length, "favori"], [plan.notes.size, "not"]]
       .filter(([count]) => count).map(([count, label]) => count + " " + label);
@@ -952,6 +990,7 @@ function showDetail(id) {
     <div class="history-plot">${chart(history, id)}</div>
     <div class="point-details" id="point-details" aria-live="polite"></div>
     ${measurementGuide(result.name)}
+    ${state.demo ? "" : `<button class="secondary-button add-measurement" data-action="followup" data-id="${escape(result.id)}" type="button">${icon("plus")} Yeni ölçüm ekle</button>`}
     <h3 class="history-heading">Ölçüm geçmişi</h3>
     <div class="history-list">${history.slice().reverse().map(item => `
       <div class="history-row"><span><button class="history-date" data-point-id="${escape(item.id)}" type="button">${dateLabel(item.date)}</button><small>${escape(referenceCaption(item))}</small></span>
@@ -1002,16 +1041,16 @@ function addDialog(mode = "read") {
   else bindFile();
 }
 
-function manualForm(result = null) {
+function manualForm(result = null, defaults = result) {
   return `<form id="manual-form">
     <div class="form-grid">
       <div class="wide"><label class="field-label" for="manual-name">Ölçüm adı</label>
-        <input class="text-input" id="manual-name" name="name" list="test-names" maxlength="100" placeholder="Örneğin Hemoglobin" required value="${escape(result?.name)}">
+        <input class="text-input" id="manual-name" name="name" list="test-names" maxlength="100" placeholder="Örneğin Hemoglobin" required value="${escape(defaults?.name)}">
         <datalist id="test-names">${knownNames.map(name => `<option value="${escape(name)}"></option>`).join("")}</datalist></div>
-      <div><label class="field-label" for="manual-system">Analiz sistemi</label><select class="select-input" id="manual-system" name="system">${options(result?.system ?? "other")}</select></div>
+      <div><label class="field-label" for="manual-system">Analiz sistemi</label><select class="select-input" id="manual-system" name="system">${options(defaults?.system ?? "other")}</select></div>
       <div><label class="field-label" for="manual-date">Tahlil tarihi</label><input class="text-input" id="manual-date" name="date" type="date" required value="${escape(result?.date || today())}"></div>
       <div><label class="field-label" for="manual-value">Sonuç</label><input class="text-input" id="manual-value" name="value" maxlength="32" required placeholder="13,8 veya Negatif" value="${result ? escape(displayValue(result)) : ""}"></div>
-      <div><label class="field-label" for="manual-unit">Birim</label><input class="text-input" id="manual-unit" name="unit" maxlength="40" placeholder="g/dL" value="${escape(result?.unit)}"></div>
+      <div><label class="field-label" for="manual-unit">Birim</label><input class="text-input" id="manual-unit" name="unit" maxlength="40" placeholder="g/dL" value="${escape(defaults?.unit)}"></div>
       <div class="wide"><label class="field-label" for="manual-reference">Rapordaki referans aralığı</label><input class="text-input" id="manual-reference" name="reference" maxlength="42" placeholder="12–16 veya &lt;130" value="${result ? escape(referenceText(result)) : ""}"></div>
       <div class="wide"><label class="field-label" for="manual-note">Ölçüm notu</label><textarea class="text-area" id="manual-note" name="note" maxlength="${noteLimit}" rows="2" placeholder="Örneğin aç karnına verildi">${escape(result?.note)}</textarea></div>
     </div>
@@ -1068,6 +1107,13 @@ function editResult(id) {
   bindManual(result);
 }
 
+function addFollowup(id) {
+  const result = state.results.find(item => item.id === id);
+  if (!result || state.demo) return;
+  openModal(`<h2 id="modal-title">Yeni ölçüm ekle</h2>${manualForm(null, result)}`);
+  bindManual();
+}
+
 function confirmDelete(id) {
   const result = state.results.find(item => item.id === id);
   if (!result || state.demo) return;
@@ -1112,7 +1158,8 @@ function saveResults(records, existing) {
   closeModal();
   filter = "all";
   search = "";
-  resultDateFilter = "";
+  resultStart = "";
+  resultEnd = "";
   navigate("results");
   toast(firstSave ? `İlk tahlilin defterinde! ${added} sonuç eklendi.`
     : existing ? "Kayıt güncellendi." : added ? `${added} sonuç defterine eklendi.` : "Bu sonuçlar defterinde zaten kayıtlı.", firstSave);
@@ -1364,7 +1411,8 @@ function toggleDemo() {
   if (!saveState({ ...loadState(), demo: !state.demo })) return;
   filter = "all";
   search = "";
-  resultDateFilter = "";
+  resultStart = "";
+  resultEnd = "";
   render();
   $("#view-overview .demo-banner button")?.focus();
 }
@@ -1388,13 +1436,15 @@ document.addEventListener("click", event => {
     case "detail": showDetail(button.dataset.id); break;
     case "sample": showSample(); break;
     case "latest-results":
-      resultDateFilter = button.dataset.date;
+      resultStart = button.dataset.date;
+      resultEnd = button.dataset.date;
       filter = "all";
       search = "";
       navigate("results");
       break;
     case "clear-result-date":
-      resultDateFilter = "";
+      resultStart = "";
+      resultEnd = "";
       renderResults();
       $("#result-search").focus();
       break;
@@ -1404,6 +1454,7 @@ document.addEventListener("click", event => {
     case "backup": showBackup(); break;
     case "install": showInstall(); break;
     case "edit": editResult(button.dataset.id); break;
+    case "followup": addFollowup(button.dataset.id); break;
     case "confirm-delete": confirmDelete(button.dataset.id); break;
     case "delete": removeResult(button.dataset.id); break;
     case "toggle-demo": toggleDemo(); break;
