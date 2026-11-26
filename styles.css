@@ -443,10 +443,12 @@ main { width: min(1270px, 100%); margin: 0 auto; padding: 34px clamp(22px, 4.5vw
 .visit-option input, .visit-note-option input { width: 17px; height: 17px; flex-shrink: 0; accent-color: var(--green); }
 .visit-note-option { margin-bottom: 9px; font-size: 13px; font-weight: 800; }
 .visit-list { display: grid; gap: 7px; }
-.visit-row { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 8px; padding: 9px; border: 1px solid var(--line); border-radius: 9px; overflow-wrap: anywhere; }
-.visit-row h3 { margin: 0; font: 800 14px var(--display); }
-.visit-row span { display: block; margin-top: 2px; color: var(--muted); font-size: 12px; }
-.visit-row p { grid-column: 1 / -1; margin: 0; padding-top: 6px; border-top: 1px solid var(--line); color: var(--muted); font-size: 13px; white-space: pre-wrap; }
+.visit-row { display: grid; grid-template-columns: auto repeat(2, minmax(0, 1fr)); align-items: start; gap: 8px; min-height: 48px; padding: 9px; border: 1px solid var(--line); border-radius: 9px; overflow-wrap: anywhere; cursor: pointer; }
+.visit-row input { width: 17px; height: 17px; margin: 2px 0 0; accent-color: var(--green); }
+.visit-row[data-excluded="true"] { border-style: dashed; background: #f5f7f4; }
+.visit-cell > strong { font: 800 14px var(--display); }
+.visit-cell > small { display: block; margin-top: 2px; color: var(--muted); font-size: 12px; }
+.visit-row-note { grid-column: 2 / -1; padding-top: 6px; border-top: 1px solid var(--line); color: var(--muted); font-size: 13px; white-space: pre-wrap; }
 .visit-actions { position: sticky; bottom: -24px; margin: 6px -24px -24px; padding: 5px 24px 14px; border-top: 1px solid var(--line); background: var(--surface); }
 .modal:has(.visit-actions) { scroll-padding-block-end: 95px; }
 .quest-catalog { min-height: 30px; margin-top: 4px; color: #685521; }

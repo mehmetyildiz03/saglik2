@@ -16,13 +16,20 @@ export function visitRecords(records, start, end, selectedKeys) {
     (!selectedKeys || selectedKeys.has(visitKey(record))));
 }
 
+export function orderVisitRecords(records) {
+  return [...records].sort((a, b) => a.name.localeCompare(b.name, "tr") || b.date.localeCompare(a.date));
+}
+
+export function visitRow(record, includeNotes = false) {
+  return {
+    name: record.name,
+    date: record.date.split("-").reverse().join("."),
+    result: [displayValue(record), record.unit].filter(Boolean).join(" "),
+    reference: referenceText(record) || "—",
+    note: includeNotes ? record.note?.trim() || "" : "",
+  };
+}
+
 export function visitRows(records, includeNotes = false) {
-  return [...records].sort((a, b) => a.name.localeCompare(b.name, "tr") || b.date.localeCompare(a.date))
-    .map(record => ({
-      name: record.name,
-      date: record.date.split("-").reverse().join("."),
-      result: [displayValue(record), record.unit].filter(Boolean).join(" "),
-      reference: referenceText(record) || "—",
-      note: includeNotes ? record.note?.trim() || "" : "",
-    }));
+  return orderVisitRecords(records).map(record => visitRow(record, includeNotes));
 }

@@ -10,7 +10,7 @@ Denge bir tahlil defteri. Raporundaki ölçümleri sistemlere göre düzenler ve
 2. Kontrol ekranında her ölçümün tarihini, değerini, birimini ve referans aralığını raporla karşılaştır. Eksik bir ölçümü burada elle ekleyebilirsin. **Sonuçları kaydet** ile yeni kayıtları defterine ekle.
 3. **Analiz sistemleri** ekranında bir ölçümü ara veya yıldızla favorilerine ekle. Geçmiş grafiğindeki bir noktaya dokunarak o günün sonucunu ve referans aralığını gör.
 4. **Tahlil defterim** ekranında **Tarihleri karşılaştır** ile iki tarihteki ortak ölçümleri yan yana aç.
-5. **Randevu özeti** ile bir tarih aralığı ve ölçümler seç. Önizlemeyi kontrol edip PDF’yi indir. Ölçüm notlarını eklemek için önizlemedeki seçeneği işaretle.
+5. **Randevu özeti** ile bir tarih aralığı ve ölçümler seç. Önizlemede paylaşacağın kayıtları işaretli bırakıp PDF’yi indir. Ölçüm notlarını eklemek için önizlemedeki not seçeneğini işaretle.
 
 Metin raporlarında ölçüm adı ve sonuç aynı satırda olmalı. Tarihi bölüm başlığında veya ölçüm satırının başında belirtebilirsin. Noktalı virgülle ayrılmış metinde isteğe bağlı beşinci sütun ölçüm tarihidir. Birim ve referans isteğe bağlıdır.
 

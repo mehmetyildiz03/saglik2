@@ -3,7 +3,7 @@ import {
   parseReport, parseValue, readingKey, referenceText, resultKey, statusOf, statuses, systemFor, systems, validDate,
 } from "./domain.js";
 import { makeBackup, planRestore, readBackup } from "./backup.js";
-import { visitKey, visitRecords, visitRows, visitWindow } from "./visit.js";
+import { orderVisitRecords, visitKey, visitRecords, visitRow, visitRows, visitWindow } from "./visit.js";
 
 const icons = {
   home: '<path d="m3 10 9-7 9 7v10a1 1 0 0 1-1 1h-5v-7H9v7H4a1 1 0 0 1-1-1Z"/>',
@@ -417,7 +417,7 @@ function showVisit() {
   const demo = state.demo;
   let { start, end } = visitWindow(records);
   const selected = new Set();
-  let includeNotes = false;
+  const excluded = new Set();
   const demoLabel = demo ? '<p class="visit-demo">Örnek veri</p>' : "";
 
   function showSelection() {
@@ -439,9 +439,10 @@ function showVisit() {
     const selection = () => visitRecords(records, start, end, selected);
 
     function updateCount() {
-      const count = selection().length;
+      const candidates = selection();
+      const count = candidates.filter(record => !excluded.has(record.id)).length;
       $("#visit-count").textContent = count + " kayıt seçili";
-      submit.disabled = !count;
+      submit.disabled = !candidates.length;
     }
 
     function showOptions() {
@@ -476,14 +477,26 @@ function showVisit() {
   }
 
   function showPreview(chosen) {
-    includeNotes = false;
-    const period = start === end ? dateLabel(start) : dateLabel(start) + " – " + dateLabel(end);
+    const ordered = orderVisitRecords(chosen);
+    const included = () => ordered.filter(record => !excluded.has(record.id));
+    const period = records => {
+      const dates = records.map(record => record.date).sort();
+      return dates[0] === dates.at(-1) ? dateLabel(dates[0]) : dateLabel(dates[0]) + " – " + dateLabel(dates.at(-1));
+    };
     openModal(`<h2 id="modal-title">Özet önizlemesi</h2>
       ${demoLabel}
-      <p class="modal-intro">${chosen.length} kayıt · ${escape(period)}</p>
-      ${chosen.some(record => record.note) ? `<label class="visit-note-option"><input type="checkbox" id="visit-include-notes" ${includeNotes ? "checked" : ""}> Ölçüm notlarını PDF’ye ekle</label>` : ""}
-      <div class="visit-list" id="visit-list"></div>
+      <p class="modal-intro">PDF’ye girecek kayıtları işaretli bırak.</p>
+      ${chosen.some(record => record.note) ? '<label class="visit-note-option"><input type="checkbox" id="visit-include-notes"> Ölçüm notlarını PDF’ye ekle</label>' : ""}
+      <div class="visit-list" id="visit-list">${ordered.map(record => {
+        const row = visitRow(record);
+        return `<label class="visit-row">
+          <input type="checkbox" value="${escape(record.id)}" ${excluded.has(record.id) ? "" : "checked"}>
+          <span class="visit-cell"><strong>${escape(row.name)}</strong><small>${escape(row.date)}</small></span>
+          <span class="visit-cell"><strong>${escape(row.result)}</strong><small>Referans ${escape(row.reference)}</small></span>
+          ${record.note ? '<span class="visit-row-note" hidden></span>' : ""}</label>`;
+      }).join("")}</div>
       <div class="visit-actions">
+        <p class="visit-count" id="visit-preview-count" role="status"></p>
         <p class="parse-status" id="parse-status" role="status"></p>
         <div class="form-actions">
           <button class="secondary-button" id="edit-visit" type="button">Seçimi düzenle</button>
@@ -491,28 +504,52 @@ function showVisit() {
         </div>
       </div>`);
 
-    function previewRows() {
-      $("#visit-list").innerHTML = visitRows(chosen, includeNotes).map(row => `<article class="visit-row">
-        <div><h3>${escape(row.name)}</h3><span>${escape(row.date)}</span></div>
-        <div><strong>${escape(row.result)}</strong><span>Referans ${escape(row.reference)}</span></div>
-        ${row.note ? `<p>${escape(row.note)}</p>` : ""}</article>`).join("");
-    }
+    const list = $("#visit-list");
     const notes = $("#visit-include-notes");
-    notes?.addEventListener("change", event => {
-      includeNotes = event.target.checked;
-      previewRows();
+    const download = $("#download-visit");
+    const checkboxes = [...list.querySelectorAll("input")];
+    function updatePreview() {
+      const records = included();
+      const count = records.length;
+      $("#visit-preview-count").textContent = count
+        ? count + " / " + chosen.length + " kayıt PDF’ye girecek · " + period(records)
+        : "PDF için en az bir kayıt seç.";
+      for (const [index, checkbox] of checkboxes.entries()) {
+        const row = checkbox.closest(".visit-row");
+        row.dataset.excluded = String(!checkbox.checked);
+        const note = row.querySelector(".visit-row-note");
+        if (note) {
+          note.hidden = !checkbox.checked || !notes?.checked;
+          note.textContent = note.hidden ? "" : ordered[index].note.trim();
+        }
+      }
+      if (notes) notes.disabled = !records.some(record => record.note);
+      download.disabled = !count;
+    }
+    list.addEventListener("change", event => {
+      const checkbox = event.target;
+      if (checkbox.checked) excluded.delete(checkbox.value);
+      else excluded.add(checkbox.value);
+      formStatus("");
+      updatePreview();
+    });
+    notes?.addEventListener("change", () => {
+      formStatus("");
+      updatePreview();
     });
     $("#edit-visit").addEventListener("click", showSelection);
-    const download = $("#download-visit");
     download.addEventListener("click", async () => {
       const revision = modalRevision;
-      const rows = visitRows(chosen, includeNotes);
+      const records = included();
+      if (!records.length) return;
+      const rows = visitRows(records, notes?.checked);
       download.disabled = true;
+      for (const checkbox of checkboxes) checkbox.disabled = true;
       if (notes) notes.disabled = true;
       formStatus("PDF hazırlanıyor…");
       try {
         const { buildVisitPdf } = await import("./visit-pdf.js");
-        const pdf = await buildVisitPdf(rows, { demo, period });
+        const pdf = await buildVisitPdf(rows, { demo, period: period(records) });
         if (modalRevision !== revision) return;
         downloadFile(pdf, "denge-randevu-ozeti-" + today() + ".pdf");
         completeQuest("visit");
@@ -521,12 +558,12 @@ function showVisit() {
         if (modalRevision === revision) formStatus("PDF hazırlanamadı. Denge’yi yenileyip tekrar dene.", true);
       } finally {
         if (modalRevision === revision) {
-          download.disabled = false;
-          if (notes) notes.disabled = false;
+          for (const checkbox of checkboxes) checkbox.disabled = false;
+          updatePreview();
         }
       }
     });
-    previewRows();
+    updatePreview();
   }
 
   showSelection();
