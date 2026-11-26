@@ -36,7 +36,7 @@ test("previews only new records, keeps changed references and skips duplicates w
 test("can restore a favorite for a measurement that is already in the notebook", () => {
   const imported = readBackup(makeBackup({ results: [vitamin], favorites: { personal: [favorite] } }));
   assert.deepEqual(planRestore({ results: [vitamin] }, imported), {
-    records: [], repeated: 1, favorites: [favorite],
+    records: [], repeated: 1, favorites: [favorite], notes: new Map(),
   });
 });
 
@@ -44,7 +44,7 @@ test("rejects other file types, future versions and broken measurement dates", (
   assert.throws(() => readBackup("{"), /okunamadı/);
   assert.throws(() => readBackup(JSON.stringify({ format: "unrelated" })), /Denge yedeği değil/);
   const valid = JSON.parse(makeBackup({ results: [blood, vitamin] }));
-  assert.throws(() => readBackup(JSON.stringify({ ...valid, version: 2 })), /güncellemen/);
+  assert.throws(() => readBackup(JSON.stringify({ ...valid, version: 3 })), /güncellemen/);
   valid.records[1].date = "2026-02-31";
   assert.throws(() => readBackup(JSON.stringify(valid)), /geçersiz/);
 });
@@ -54,4 +54,13 @@ test("keeps qualitative results in older records", () => {
   const imported = readBackup(makeBackup(state));
   assert.equal(imported.records[0].value, "Negatif");
   assert.equal(imported.records[0].min, null);
+});
+
+test("opens v1 backups and fills only missing notes when restoring matching results", () => {
+  const old = JSON.parse(makeBackup({ results: [blood] }));
+  assert.equal(readBackup(JSON.stringify({ ...old, version: 1 })).records[0].note, undefined);
+  const portable = readBackup(makeBackup({ results: [{ ...blood, note: "Aç karnına verildi." }] }));
+  assert.equal(portable.records[0].note, "Aç karnına verildi.");
+  assert.deepEqual(planRestore({ results: [blood] }, portable).notes, new Map([[blood.id, "Aç karnına verildi."]]));
+  assert.equal(planRestore({ results: [{ ...blood, note: "Kendi notum" }] }, portable).notes.size, 0);
 });

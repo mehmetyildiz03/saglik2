@@ -433,6 +433,30 @@ main { width: min(1270px, 100%); margin: 0 auto; padding: 34px clamp(22px, 4.5vw
 #restore-backup { margin-top: 10px; }
 .backup-summary[hidden], #restore-backup[hidden], #install-app[hidden] { display: none; }
 .install-state { margin: 13px 0 0; color: var(--dark); font-size: 14px; font-weight: 700; }
+.point-details .point-note { flex-basis: 100%; margin: 3px 0 0; padding-top: 7px; border-top: 1px solid #cbded1; font-size: 13px; white-space: pre-wrap; overflow-wrap: anywhere; }
+.point-details .point-note strong { font: 800 13px "DM Sans", sans-serif; }
+.visit-demo { display: inline-block; margin: 0 0 8px; padding: 3px 7px; border-radius: 6px; background: var(--yellow); color: #6b5425; font-size: 12px; font-weight: 800; }
+.visit-fieldset { min-width: 0; margin: 14px 0 0; padding: 4px 8px 8px; border: 1px solid var(--line); border-radius: 11px; }
+.visit-fieldset legend { padding: 0 5px; color: var(--dark); font-size: 13px; font-weight: 800; }
+.visit-options { display: grid; gap: 5px; max-height: 305px; overflow: auto; padding: 3px; }
+.visit-options > p, .visit-count { margin: 6px 0 0; color: var(--muted); font-size: 13px; }
+.visit-option, .visit-note-option { display: flex; align-items: center; gap: 9px; min-height: 44px; padding: 6px 8px; border-radius: 8px; background: #f5f8f3; cursor: pointer; }
+.visit-option > span { flex: 1; min-width: 0; overflow-wrap: anywhere; }
+.visit-option small { display: block; color: var(--muted); font-size: 11px; }
+.visit-option > small { flex: 0 0 auto; }
+.visit-option input, .visit-note-option input { width: 17px; height: 17px; flex-shrink: 0; accent-color: var(--green); }
+.visit-note-option { margin-bottom: 9px; font-size: 13px; font-weight: 800; }
+.visit-list { display: grid; gap: 7px; }
+.visit-row { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 8px; padding: 9px; border: 1px solid var(--line); border-radius: 9px; overflow-wrap: anywhere; }
+.visit-row h3 { margin: 0; font: 800 14px var(--display); }
+.visit-row span { display: block; margin-top: 2px; color: var(--muted); font-size: 12px; }
+.visit-row p { grid-column: 1 / -1; margin: 0; padding-top: 6px; border-top: 1px solid var(--line); color: var(--muted); font-size: 13px; white-space: pre-wrap; }
+.visit-actions { position: sticky; bottom: -24px; margin: 6px -24px -24px; padding: 5px 24px 14px; border-top: 1px solid var(--line); background: var(--surface); }
+.modal:has(.visit-actions) { scroll-padding-block-end: 95px; }
+.quest-catalog { min-height: 30px; margin-top: 4px; color: #685521; }
+.quest-list { display: grid; gap: 7px; }
+.quest-list .about-item > span { color: var(--green); }
+.quest-done { display: inline-block; margin-top: 6px; color: #315f44; font-size: 12px; font-weight: 800; }
 
 @media (max-width: 1000px) {
   .sidebar { width: 204px; padding-inline: 13px; }
@@ -472,6 +496,8 @@ main { width: min(1270px, 100%); margin: 0 auto; padding: 34px clamp(22px, 4.5vw
   .modal { width: 100%; max-height: 92dvh; padding: 21px 16px max(17px, env(safe-area-inset-bottom)); border-radius: 18px 18px 0 0; }
   .modal .text-input, .modal .select-input, .modal .text-area { font-size: 16px; }
   .preview-footer { bottom: calc(-1 * max(17px, env(safe-area-inset-bottom))); margin: 1px -16px calc(-1 * max(17px, env(safe-area-inset-bottom))); padding: 9px 16px max(12px, env(safe-area-inset-bottom)); }
+  .visit-actions { bottom: calc(-1 * max(17px, env(safe-area-inset-bottom))); margin: 6px -16px calc(-1 * max(17px, env(safe-area-inset-bottom))); padding: 5px 16px max(12px, env(safe-area-inset-bottom)); }
+  .modal-open .toast { top: max(11px, env(safe-area-inset-top)); bottom: auto; }
 }
 
 @media (max-width: 550px) {

@@ -143,6 +143,8 @@ export function validDate(date) {
   return Number.isFinite(+value) && value.toISOString().slice(0, 10) === date;
 }
 
+export const noteLimit = 240;
+
 const datePattern = "(?:\\d{4}-\\d{2}-\\d{2}|\\d{1,2}[./-]\\d{1,2}[./-]\\d{4})";
 const dateTimePattern = datePattern + "(?:\\s+\\d{1,2}:\\d{2}(?::\\d{2})?)?";
 const dateOnly = new RegExp("^(" + datePattern + ")$");

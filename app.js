@@ -1,8 +1,9 @@
 import {
-  compareMeasurements, demoResults, displayNumber, displayValue, knownNames, measurement, metricKey, normalize, parseReference,
+  compareMeasurements, demoResults, displayNumber, displayValue, knownNames, measurement, metricKey, normalize, noteLimit, parseReference,
   parseReport, parseValue, readingKey, referenceText, resultKey, statusOf, statuses, systemFor, systems, validDate,
 } from "./domain.js";
 import { makeBackup, planRestore, readBackup } from "./backup.js";
+import { visitKey, visitRecords, visitRows, visitWindow } from "./visit.js";
 
 const icons = {
   home: '<path d="m3 10 9-7 9 7v10a1 1 0 0 1-1 1h-5v-7H9v7H4a1 1 0 0 1-1-1Z"/>',
@@ -47,6 +48,12 @@ Hemoglobin 13,8 g/dL 12 – 16
 ALT 24 U/L 7 – 40
 D vitamini 28 ng/mL 30 – 100`;
 const reportLimit = 200;
+const questList = [
+  ["charts", "Grafikleri keşfet", "Üç farklı ölçümün geçmişini aç.", "activity"],
+  ["compare", "İki tarihi karşılaştır", "İki tarihte ortak bir ölçümü yan yana gör.", "calendar"],
+  ["backup", "İlk yedeğini al", "Kişisel defterinin bir kopyasını indir.", "download"],
+  ["visit", "Bir randevu özeti hazırla", "Seçtiğin ölçümleri PDF olarak indir.", "file"],
+];
 
 function loadState() {
   try {
@@ -96,10 +103,10 @@ function toast(message) {
   toastTimer = setTimeout(() => element.classList.remove("show"), 3300);
 }
 
-function resultGroups(results) {
+function resultGroups(results, keyFor = metricKey) {
   const groups = new Map();
   for (const result of results) {
-    const key = metricKey(result);
+    const key = keyFor(result);
     if (!groups.has(key)) groups.set(key, []);
     groups.get(key).push(result);
   }
@@ -266,7 +273,7 @@ function renderOverview() {
         ${groups.length ? `<section class="section-card featured-card"><div class="section-card-heading"><div><h2>İlk grafiğini keşfet</h2><p>${escape(groups[0][0].name)} geçmişi</p></div></div>
           <div class="featured-plot">${chart(groups[0])}<button class="link-button" data-action="detail" data-id="${escape(groups[0].at(-1).id)}" type="button">Ölçümleri gör ${icon("arrow")}</button></div></section>`
           : `<div class="section-card note-card"><div class="note-heading"><span>${icon("sparkle")}</span> İlk grafiğin hazır olsun</div><p>İlk tahlilini eklediğinde ölçümler burada görünecek.</p></div>`}
-        <section class="mobile-quest note-card section-card"><div class="note-heading"><span>${icon("sparkle")}</span> Keşif görevi</div><p id="mobile-quest-progress"></p><button class="link-button" data-action="quest" type="button">Grafik seç ${icon("arrow")}</button></section>
+        <section class="mobile-quest note-card section-card"><div class="note-heading"><span>${icon("sparkle")}</span> Keşif görevi</div><p id="mobile-quest-progress"></p><button class="link-button" data-action="quests" type="button">Tüm görevler ${icon("arrow")}</button></section>
       </aside>
     </div>
     <p class="page-note">Sonuçlar raporundaki referans aralığına göre gösterilir. Tıbbi değerlendirme için doktoruna danış.</p>`;
@@ -362,6 +369,7 @@ function renderResults() {
     <div class="page-heading notebook-heading"><div><h1>Tahlil defterim</h1><p>${state.demo ? "Örnek sonuçları incele veya kendi sonuçlarını ekle." : "Kayıtlarını tarih, ölçüm adı ve analiz sistemine göre bul."}</p></div>
       <div class="notebook-actions">
         ${dates.length > 1 ? `<button class="secondary-button compare-button" data-action="compare" type="button">${icon("calendar")} Tarihleri karşılaştır</button>` : ""}
+        ${dates.length ? `<button class="secondary-button" data-action="visit" type="button">${icon("file")} Randevu özeti</button>` : ""}
         <button class="secondary-button" data-action="backup" type="button">${icon("download")} Yedekle</button>
       </div>
     </div>
@@ -380,6 +388,138 @@ function resultDates() {
   return [...new Set(activeResults().map(result => result.date))].sort().reverse();
 }
 
+function showVisit() {
+  const records = activeResults();
+  if (!records.length) return;
+  const demo = state.demo;
+  let { start, end } = visitWindow(records);
+  const selected = new Set();
+  let includeNotes = false;
+  const demoLabel = demo ? '<p class="visit-demo">Örnek veri</p>' : "";
+
+  function showSelection() {
+    openModal(`<h2 id="modal-title">Randevu özeti</h2>
+      ${demoLabel}
+      <p class="modal-intro">Görüşmeye götürmek istediğin tarih aralığını ve ölçümleri seç.</p>
+      <form id="visit-form">
+        <div class="form-grid">
+          <label class="field-label">İlk tarih<input class="text-input" id="visit-start" type="date" required value="${escape(start)}"></label>
+          <label class="field-label">Son tarih<input class="text-input" id="visit-end" type="date" required value="${escape(end)}"></label>
+        </div>
+        <fieldset class="visit-fieldset"><legend>Ölçümler</legend><div id="visit-options" class="visit-options"></div></fieldset>
+        <p class="visit-count" id="visit-count" role="status"></p>
+        <div class="form-actions"><button class="primary-button" type="submit">Önizlemeyi aç ${icon("arrow")}</button></div>
+      </form>`);
+    const form = $("#visit-form");
+    const options = $("#visit-options");
+    const submit = form.querySelector("button[type=submit]");
+    const selection = () => visitRecords(records, start, end, selected);
+
+    function updateCount() {
+      const count = selection().length;
+      $("#visit-count").textContent = count + " kayıt seçili";
+      submit.disabled = !count;
+    }
+
+    function showOptions() {
+      start = $("#visit-start").value;
+      end = $("#visit-end").value;
+      const groups = resultGroups(visitRecords(records, start, end), visitKey);
+      groups.sort((a, b) => a[0].name.localeCompare(b[0].name, "tr"));
+      options.innerHTML = groups.length ? groups.map(group => {
+        const item = group[0];
+        const key = visitKey(item);
+        return `<label class="visit-option"><input type="checkbox" value="${escape(key)}" ${selected.has(key) ? "checked" : ""}>
+          <span><strong>${escape(item.name)}</strong><small>${escape([systemFor(item.system).name, item.unit].filter(Boolean).join(" · "))}</small></span>
+          <small>${group.length} kayıt</small></label>`;
+      }).join("") : `<p>${start > end ? "Son tarih ilk tarihten önce olamaz." : "Bu aralıkta ölçüm bulunamadı."}</p>`;
+      updateCount();
+    }
+
+    form.addEventListener("input", event => {
+      if (event.target.type === "date") showOptions();
+      if (event.target.type === "checkbox") {
+        if (event.target.checked) selected.add(event.target.value);
+        else selected.delete(event.target.value);
+        updateCount();
+      }
+    });
+    form.addEventListener("submit", event => {
+      event.preventDefault();
+      const chosen = selection();
+      if (chosen.length) showPreview(chosen);
+    });
+    showOptions();
+  }
+
+  function showPreview(chosen) {
+    includeNotes = false;
+    const period = start === end ? dateLabel(start) : dateLabel(start) + " – " + dateLabel(end);
+    openModal(`<h2 id="modal-title">Özet önizlemesi</h2>
+      ${demoLabel}
+      <p class="modal-intro">${chosen.length} kayıt · ${escape(period)}</p>
+      ${chosen.some(record => record.note) ? `<label class="visit-note-option"><input type="checkbox" id="visit-include-notes" ${includeNotes ? "checked" : ""}> Ölçüm notlarını PDF’ye ekle</label>` : ""}
+      <div class="visit-list" id="visit-list"></div>
+      <div class="visit-actions">
+        <p class="parse-status" id="parse-status" role="status"></p>
+        <div class="form-actions">
+          <button class="secondary-button" id="edit-visit" type="button">Seçimi düzenle</button>
+          <button class="primary-button" id="download-visit" type="button">${icon("download")} PDF indir</button>
+        </div>
+      </div>`);
+
+    function previewRows() {
+      $("#visit-list").innerHTML = visitRows(chosen, includeNotes).map(row => `<article class="visit-row">
+        <div><h3>${escape(row.name)}</h3><span>${escape(row.date)}</span></div>
+        <div><strong>${escape(row.result)}</strong><span>Referans ${escape(row.reference)}</span></div>
+        ${row.note ? `<p>${escape(row.note)}</p>` : ""}</article>`).join("");
+    }
+    const notes = $("#visit-include-notes");
+    notes?.addEventListener("change", event => {
+      includeNotes = event.target.checked;
+      previewRows();
+    });
+    $("#edit-visit").addEventListener("click", showSelection);
+    const download = $("#download-visit");
+    download.addEventListener("click", async () => {
+      const revision = modalRevision;
+      const rows = visitRows(chosen, includeNotes);
+      download.disabled = true;
+      if (notes) notes.disabled = true;
+      formStatus("PDF hazırlanıyor…");
+      try {
+        const { buildVisitPdf } = await import("./visit-pdf.js");
+        const pdf = await buildVisitPdf(rows, { demo, period });
+        if (modalRevision !== revision) return;
+        downloadFile(pdf, "denge-randevu-ozeti-" + today() + ".pdf");
+        completeQuest("visit");
+        formStatus("PDF indirmeye hazır.");
+      } catch {
+        if (modalRevision === revision) formStatus("PDF hazırlanamadı. Denge’yi yenileyip tekrar dene.", true);
+      } finally {
+        if (modalRevision === revision) {
+          download.disabled = false;
+          if (notes) notes.disabled = false;
+        }
+      }
+    });
+    previewRows();
+  }
+
+  showSelection();
+}
+
+function downloadFile(blob, filename) {
+  const url = URL.createObjectURL(blob);
+  const link = document.createElement("a");
+  link.href = url;
+  link.download = filename;
+  $("#modal-content").append(link);
+  link.click();
+  link.remove();
+  setTimeout(() => URL.revokeObjectURL(url), 30000);
+}
+
 function downloadBackup() {
   try {
     const notebook = loadState();
@@ -387,14 +527,8 @@ function downloadBackup() {
       formStatus("Yedeklenecek kişisel ölçüm yok.", true);
       return;
     }
-    const url = URL.createObjectURL(new Blob([makeBackup(notebook)], { type: "application/json" }));
-    const link = document.createElement("a");
-    link.href = url;
-    link.download = `denge-yedek-${today()}.json`;
-    $("#modal-content").append(link);
-    link.click();
-    link.remove();
-    setTimeout(() => URL.revokeObjectURL(url), 30000);
+    downloadFile(new Blob([makeBackup(notebook)], { type: "application/json" }), `denge-yedek-${today()}.json`);
+    completeQuest("backup");
   } catch (error) {
     formStatus(error.message, true);
   }
@@ -403,7 +537,7 @@ function downloadBackup() {
 function showBackup() {
   const count = loadState().results.length;
   openModal(`<h2 id="modal-title">Defter yedeği</h2>
-    <p class="modal-intro">Kişisel ölçümlerini ve favorilerini tek dosyada taşı.</p>
+    <p class="modal-intro">Kişisel ölçümlerini, notlarını ve favorilerini tek dosyada taşı.</p>
     <div class="backup-sections">
       <section>
         <h3>Yedek indir</h3>
@@ -433,8 +567,9 @@ function showBackup() {
   function displayPlan(plan) {
     summary.hidden = false;
     summary.innerHTML = `<span><strong>${plan.records.length}</strong> eklenecek ölçüm</span>
-      <span><strong>${plan.repeated}</strong> tekrar</span><span><strong>${plan.favorites.length}</strong> eklenecek favori</span>`;
-    restore.hidden = !plan.records.length && !plan.favorites.length;
+      <span><strong>${plan.repeated}</strong> tekrar</span><span><strong>${plan.favorites.length}</strong> eklenecek favori</span>
+      ${plan.notes.size ? `<span><strong>${plan.notes.size}</strong> mevcut kayda eklenecek not</span>` : ""}`;
+    restore.hidden = !plan.records.length && !plan.favorites.length && !plan.notes.size;
   }
 
   fileInput.addEventListener("change", async () => {
@@ -465,18 +600,22 @@ function showBackup() {
     if (!backup) return;
     const current = loadState();
     const plan = planRestore(current, backup);
-    if (!plan.records.length && !plan.favorites.length) {
+    if (!plan.records.length && !plan.favorites.length && !plan.notes.size) {
       displayPlan(plan);
       return;
     }
-    const results = current.results.concat(plan.records.map(record => ({ ...record, id: crypto.randomUUID() })));
+    const results = current.results
+      .map(record => plan.notes.has(record.id) ? { ...record, note: plan.notes.get(record.id) } : record)
+      .concat(plan.records.map(record => ({ ...record, id: crypto.randomUUID() })));
     const favorites = { ...current.favorites, personal: [...(current.favorites?.personal ?? []), ...plan.favorites] };
     if (!saveState({ ...current, results, favorites, demo: false })) return;
     closeModal();
     filter = "all";
     search = "";
     navigate("results");
-    toast(`Yedek geri yüklendi · ${plan.records.length} ölçüm, ${plan.favorites.length} favori eklendi.`);
+    const restored = [[plan.records.length, "ölçüm"], [plan.favorites.length, "favori"], [plan.notes.size, "not"]]
+      .filter(([count]) => count).map(([count, label]) => count + " " + label);
+    toast(`Yedek geri yüklendi · ${restored.join(", ")} eklendi.`);
   });
 }
 
@@ -527,6 +666,46 @@ function renderComparison() {
         <div class="compare-grid">${column(first, firstDate)}${column(second, secondDate)}</div>
       </section>`;
     }).join("")}</div>`;
+  completeQuest("compare");
+}
+
+function completeQuest(id) {
+  const current = loadState();
+  const completed = current.completedQuests ?? [];
+  if (completed.includes(id)) return;
+  if (saveState({ ...current, completedQuests: [...completed, id] })) {
+    toast("✦ Mini görev tamamlandı!");
+  }
+}
+
+function showQuests() {
+  const finished = new Set(state.completedQuests ?? []);
+  if (state.discoveries.length >= 3) finished.add("charts");
+  openModal(`<h2 id="modal-title">Mini görevler</h2>
+    <p class="modal-intro">${questList.filter(([id]) => finished.has(id)).length} / ${questList.length} görev tamamlandı</p>
+    <div class="quest-list">${questList.map(([id, title, description, symbol]) => `<div class="about-item">
+      <span>${icon(finished.has(id) ? "star" : symbol)}</span><div><strong>${title}</strong><p>${description}</p>
+      ${finished.has(id) ? '<span class="quest-done">Tamamlandı</span>'
+        : `<button class="link-button" data-action="quest-open" data-quest="${id}" type="button" aria-label="${title} görevini aç">Göreve git ${icon("arrow")}</button>`}
+      </div></div>`).join("")}</div>`);
+}
+
+function openQuest(id) {
+  closeModal();
+  if (id === "charts") {
+    startQuest();
+    return;
+  }
+  navigate("results");
+  if (id === "backup") showBackup();
+  if (id === "visit") {
+    if (activeResults().length) showVisit();
+    else addDialog();
+  }
+  if (id === "compare") {
+    if (resultDates().length > 1) showComparison();
+    else toast("Karşılaştırma için iki farklı tarihte ölçüm ekle.");
+  }
 }
 
 function renderQuest() {
@@ -696,7 +875,8 @@ function selectChartPoint(id) {
     point.closest(".history-row")?.classList.toggle("highlight", selected);
   }
   details.innerHTML = `<div><span>${dateLabel(result.date)}</span><strong>${escape(displayValue(result))} <small>${escape(result.unit)}</small></strong></div>
-    <div><span>${escape(referenceCaption(result))}</span>${badge(result)}</div>`;
+    <div><span>${escape(referenceCaption(result))}</span>${badge(result)}</div>
+    ${result.note ? `<p class="point-note"><strong>Not</strong> ${escape(result.note)}</p>` : ""}`;
 }
 
 function options(system) {
@@ -736,6 +916,7 @@ function manualForm(result = null) {
       <div><label class="field-label" for="manual-value">Sonuç</label><input class="text-input" id="manual-value" name="value" maxlength="32" required placeholder="13,8 veya Negatif" value="${result ? escape(displayValue(result)) : ""}"></div>
       <div><label class="field-label" for="manual-unit">Birim</label><input class="text-input" id="manual-unit" name="unit" maxlength="40" placeholder="g/dL" value="${escape(result?.unit)}"></div>
       <div class="wide"><label class="field-label" for="manual-reference">Rapordaki referans aralığı</label><input class="text-input" id="manual-reference" name="reference" maxlength="42" placeholder="12–16 veya &lt;130" value="${result ? escape(referenceText(result)) : ""}"></div>
+      <div class="wide"><label class="field-label" for="manual-note">Ölçüm notu</label><textarea class="text-area" id="manual-note" name="note" maxlength="${noteLimit}" rows="2" placeholder="Örneğin aç karnına verildi">${escape(result?.note)}</textarea></div>
     </div>
     <p class="parse-status" id="parse-status" role="status"></p>
     <div class="form-actions">${result ? `<button class="secondary-button danger-button" data-action="confirm-delete" data-id="${escape(result.id)}" type="button">Kaydı sil</button>` : ""}
@@ -747,12 +928,15 @@ function makeResult(row, id) {
   const name = String(row.name || "").trim();
   const value = parseValue(row.value);
   const reference = parseReference(row.reference);
+  const note = String(row.note ?? "").trim();
   if (!name || name.length > 100) throw new Error("Ölçüm adını gir.");
   if (!value) throw new Error(`${name} için geçerli bir sonuç gir.`);
   if (!reference) throw new Error(`${name} için aralığı 12–16 veya <130 biçiminde gir.`);
   if (typeof value.value !== "number" && (reference.min !== null || reference.max !== null)) throw new Error(`${name} için sayısal referansı temizle.`);
   if (!validDate(row.date)) throw new Error("Tahlil tarihini gir.");
-  return { id, name: measurement(name)?.name || name, system: systemFor(row.system).id, unit: String(row.unit || "").trim(), date: row.date, ...value, ...reference };
+  if (note.length > noteLimit) throw new Error(`Ölçüm notu en fazla ${noteLimit} karakter olabilir.`);
+  return { id, name: measurement(name)?.name || name, system: systemFor(row.system).id,
+    unit: String(row.unit || "").trim(), date: row.date, ...value, ...reference, ...(note ? { note } : {}) };
 }
 
 function formStatus(message, error = false) {
@@ -1078,13 +1262,15 @@ document.addEventListener("click", event => {
     case "detail": showDetail(button.dataset.id); break;
     case "favorite": toggleFavorite(button.dataset.id); break;
     case "compare": showComparison(); break;
+    case "visit": showVisit(); break;
     case "backup": showBackup(); break;
     case "install": showInstall(); break;
     case "edit": editResult(button.dataset.id); break;
     case "confirm-delete": confirmDelete(button.dataset.id); break;
     case "delete": removeResult(button.dataset.id); break;
     case "toggle-demo": toggleDemo(); break;
-    case "quest": startQuest(); break;
+    case "quests": showQuests(); break;
+    case "quest-open": openQuest(button.dataset.quest); break;
     case "append-row": appendPreviewRow(); break;
     case "fill-dates": fillPreviewDates(); break;
     case "remove-row": {

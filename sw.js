@@ -4,7 +4,8 @@ const scope = self.registration.scope;
 const cachePrefix = "denge-shell:" + scope + ":";
 const cacheName = cachePrefix + RELEASE;
 const shellFiles = new Set([
-  "", "styles.css", "app.js", "domain.js", "backup.js", "reader.js", "favicon.svg", "manifest.webmanifest",
+  "", "styles.css", "app.js", "domain.js", "backup.js", "visit.js", "visit-pdf.js", "reader.js", "favicon.svg", "manifest.webmanifest",
+  "vendor/visit-pdf/jspdf.umd.min.js", "vendor/visit-pdf/LiberationSans-Regular.ttf",
   "assets/denge-sprout.webp", "assets/denge-icon-192.png", "assets/denge-icon-512.png",
   "assets/dm-sans-latin-wght-normal.woff2", "assets/dm-sans-latin-ext-wght-normal.woff2",
   "assets/manrope-latin-wght-normal.woff2", "assets/manrope-latin-ext-wght-normal.woff2",
