@@ -69,6 +69,7 @@ let state = loadState();
 let view = "overview";
 let systemId = "blood";
 let filter = "all";
+let resultDateFilter = "";
 let search = "";
 let systemSearch = "";
 let toastTimer;
@@ -232,6 +233,8 @@ function renderOverview() {
   const results = activeResults();
   const groups = resultGroups(results);
   const latest = groups.map(group => group.at(-1));
+  const addedDate = !state.demo && results.some(record => record.date === state.latestEntryDate) ? state.latestEntryDate : "";
+  const latestDate = addedDate || resultDates()[0];
   const rangeCount = latest.filter(result => statusOf(result) === "in-range").length;
   const outsideCount = latest.filter(result => ["low", "high"].includes(statusOf(result))).length;
   const systemCount = new Set(results.map(result => result.system)).size;
@@ -248,6 +251,13 @@ function renderOverview() {
       <span class="demo-icon">${icon(state.demo ? "sparkle" : "lock")}</span>
       <span>${state.demo ? "<strong>Örnek verileri inceliyorsun.</strong> Kendi sonuçlarını ekleyerek defterini oluşturabilirsin." : "Kişisel defterin bu tarayıcıda saklanıyor."}</span>
       <button data-action="toggle-demo" type="button">${state.demo ? "Kendi defterim" : "Örneği gör"} ${icon("arrow")}</button>
+    </div>
+    <div class="overview-recent">
+      ${latestDate ? `<section class="section-card"><div class="section-card-heading">
+        <div><h2>${state.demo ? "Son örnek tahlil" : addedDate ? "Son eklenen tahlil" : "Son tahlil"}</h2><p>${dateLabel(latestDate)} · ${results.filter(record => record.date === latestDate).length} sonuç</p></div>
+        <button class="link-button" data-action="latest-results" data-date="${latestDate}" type="button">Sonuçları gör ${icon("arrow")}</button>
+      </div></section>` : ""}
+      <div id="favorites-panel"></div>
     </div>
     <section class="hero-card">
       <div class="hero-copy"><h2>Tahlillerini tek yerde topla.</h2><p>Raporunu ekle, her ölçümü kendi grafiğinde incele ve önceki tahlillerinle karşılaştır.</p>
@@ -269,7 +279,6 @@ function renderOverview() {
       <aside class="side-stack">
         <div class="summary-cards" aria-label="Son ölçümlerin özeti">${summary.map(([color, symbol, number, name]) =>
           `<div class="summary-card ${color}"><div class="summary-top">${icon(symbol)}</div><strong>${number}</strong><small>${name}</small></div>`).join("")}</div>
-        <div id="favorites-panel"></div>
         ${groups.length ? `<section class="section-card featured-card"><div class="section-card-heading"><div><h2>İlk grafiğini keşfet</h2><p>${escape(groups[0][0].name)} geçmişi</p></div></div>
           <div class="featured-plot">${chart(groups[0])}<button class="link-button" data-action="detail" data-id="${escape(groups[0].at(-1).id)}" type="button">Ölçümleri gör ${icon("arrow")}</button></div></section>`
           : `<div class="section-card note-card"><div class="note-heading"><span>${icon("sparkle")}</span> İlk grafiğin hazır olsun</div><p>İlk tahlilini eklediğinde ölçümler burada görünecek.</p></div>`}
@@ -285,13 +294,17 @@ function renderFavorites(groups) {
   const favoriteSet = new Set(favoriteKeys());
   const favorites = groups.filter(group => favoriteSet.has(metricKey(group[0])));
   panel.hidden = !favorites.length;
+  panel.parentElement.hidden = !favorites.length && !panel.previousElementSibling;
   panel.innerHTML = favorites.length ? `<section class="section-card">
     <div class="section-card-heading"><h2>Favori ölçümler</h2></div>
     <div class="system-list">${favorites.map(group => {
       const result = group.at(-1);
+      const previous = group.findLast(item => item.date < result.date);
+      const reading = (item, label) => `<span class="favorite-reading"><small>${label} · ${dateLabel(item.date)}</small>
+        <b>${escape(displayValue(item))} <small>${escape(item.unit)}</small></b></span>`;
       return `<button class="favorite-row" data-action="detail" data-id="${escape(result.id)}" type="button">
-        ${icon("star")}<span><strong>${escape(result.name)}</strong><small>${dateLabel(result.date)}</small></span>
-        <b>${escape(displayValue(result))} <small>${escape(result.unit)}</small></b>
+        <span class="favorite-name">${icon("star")} <strong>${escape(result.name)}</strong></span>
+        <span class="favorite-values">${reading(result, "Son")}${previous ? reading(previous, "Önceki") : ""}</span>
       </button>`;
     }).join("")}</div></section>` : "";
 }
@@ -351,7 +364,8 @@ function renderSystemMetrics() {
 
 function resultList() {
   const results = activeResults()
-    .filter(result => (filter === "all" || filter === result.system) && normalize(result.name).includes(normalize(search.trim())))
+    .filter(result => (!resultDateFilter || result.date === resultDateFilter) &&
+      (filter === "all" || filter === result.system) && normalize(result.name).includes(normalize(search.trim())))
     .sort((a, b) => b.date.localeCompare(a.date) || a.name.localeCompare(b.name, "tr"));
   $("#result-count").textContent = `${results.length} sonuç`;
   $("#result-list").innerHTML = results.length ? results.map(result => `
@@ -378,6 +392,8 @@ function renderResults() {
         <option value="all">Tüm sistemler</option>${systems.map(system => `<option value="${system.id}" ${filter === system.id ? "selected" : ""}>${system.name}</option>`).join("")}
       </select><span id="result-count" aria-live="polite"></span>
     </div>
+    ${resultDateFilter ? `<div class="result-date-chip"><span>${dateLabel(resultDateFilter)}</span>
+      <button class="link-button" data-action="clear-result-date" type="button">Tüm tarihleri gör</button></div>` : ""}
     <div class="all-results-list" id="result-list"></div>`;
   $("#result-search").addEventListener("input", event => { search = event.target.value; resultList(); });
   $("#system-filter").addEventListener("change", event => { filter = event.target.value; resultList(); });
@@ -612,6 +628,7 @@ function showBackup() {
     closeModal();
     filter = "all";
     search = "";
+    resultDateFilter = "";
     navigate("results");
     const restored = [[plan.records.length, "ölçüm"], [plan.favorites.length, "favori"], [plan.notes.size, "not"]]
       .filter(([count]) => count).map(([count, label]) => count + " " + label);
@@ -1006,10 +1023,14 @@ function saveResults(records, existing) {
     results.push({ ...record, id: record.id ?? crypto.randomUUID() });
     added++;
   }
-  if (!saveState({ ...current, demo: false, results })) return;
+  const latestEntryDate = added && !existing
+    ? results.slice(-added).reduce((date, record) => record.date > date ? record.date : date, "")
+    : current.latestEntryDate;
+  if (!saveState({ ...current, demo: false, results, latestEntryDate })) return;
   closeModal();
   filter = "all";
   search = "";
+  resultDateFilter = "";
   navigate("results");
   toast(existing ? "Kayıt güncellendi." : added ? `${added} sonuç defterine eklendi.` : "Bu sonuçlar defterinde zaten kayıtlı.");
 }
@@ -1066,9 +1087,14 @@ function parseInput() {
 }
 
 function previewRow(row = {}) {
-  return `<fieldset class="preview-row">
-    <legend>Ölçüm <span data-row-number></span></legend>
-    <button type="button" class="remove-row" data-action="remove-row">Çıkar</button>
+  return `<details class="preview-row">
+    <summary class="preview-row-summary">
+      <span><strong data-row-name></strong><small data-row-date></small></span>
+      <span class="preview-reading"><strong data-row-value></strong><small data-row-reference></small></span>
+      <span class="preview-chevron" aria-hidden="true"></span>
+    </summary>
+    <p class="preview-note" hidden></p>
+    <div class="preview-editor">
     <div class="form-grid">
       <label class="field-label">Ölçüm adı<input class="text-input" data-field="name" list="preview-names" maxlength="100" required value="${escape(row.name)}"></label>
       <label class="field-label">Tahlil tarihi<input class="text-input" data-field="date" type="date" required value="${escape(row.date)}"></label>
@@ -1077,8 +1103,9 @@ function previewRow(row = {}) {
       <label class="field-label">Referans aralığı<input class="text-input" data-field="reference" maxlength="42" value="${escape(row.reference)}"></label>
       <label class="field-label">Analiz sistemi<select class="select-input" data-field="system">${options(row.system ?? "other")}</select></label>
     </div>
-    <p class="preview-note" hidden></p>
-  </fieldset>`;
+    <button type="button" class="link-button remove-row" data-action="remove-row">Satırı çıkar</button>
+    </div>
+  </details>`;
 }
 
 function renderPreview(rows) {
@@ -1109,7 +1136,7 @@ function renderPreview(rows) {
   form.addEventListener("input", syncPreview);
   form.addEventListener("change", event => {
     if (event.target.dataset.field !== "name") return;
-    const system = event.target.closest("fieldset").querySelector('[data-field="system"]');
+    const system = event.target.closest(".preview-row").querySelector('[data-field="system"]');
     const info = measurement(event.target.value);
     if (system.value === "other" && info) system.value = info.system;
     syncPreview();
@@ -1119,7 +1146,9 @@ function renderPreview(rows) {
     const { records, incomplete } = syncPreview();
     if (incomplete) {
       formStatus("İşaretli alanları düzelt veya ilgili ölçümü çıkar.", true);
-      form.querySelector('[aria-invalid="true"]').focus();
+      const invalid = form.querySelector('[aria-invalid="true"]');
+      invalid.closest(".preview-row").open = true;
+      invalid.focus();
       return;
     }
     if (!records.length) {
@@ -1128,10 +1157,11 @@ function renderPreview(rows) {
     }
     saveResults(records);
   });
-  syncPreview();
+  syncPreview(true);
+  if (!rows.length) $("#preview-rows").firstElementChild.open = true;
 }
 
-function syncPreview() {
+function syncPreview(sortRows = false) {
   const saved = loadState().results;
   const savedKeys = new Set(saved.map(resultKey));
   const savedReadings = new Set(saved.map(readingKey));
@@ -1139,11 +1169,11 @@ function syncPreview() {
   const records = [];
   let repeated = 0;
   let incomplete = 0;
+  let reviewCount = 0;
   let missingDate = false;
 
   const rows = [...document.querySelectorAll(".preview-row")];
   for (const [index, row] of rows.entries()) {
-    row.querySelector("[data-row-number]").textContent = index + 1;
     const inputs = [...row.querySelectorAll("[data-field]")];
     const fields = Object.fromEntries(inputs.map(input => [input.dataset.field, input.value]));
     row.querySelector(".remove-row").setAttribute("aria-label", fields.name.trim()
@@ -1151,6 +1181,10 @@ function syncPreview() {
     const value = parseValue(fields.value);
     const reference = parseReference(fields.reference);
     const numeric = typeof value?.value === "number";
+    row.querySelector("[data-row-name]").textContent = fields.name.trim() || "Yeni ölçüm";
+    row.querySelector("[data-row-date]").textContent = validDate(fields.date) ? dateLabel(fields.date) : "Tarih eksik";
+    row.querySelector("[data-row-value]").textContent = value ? [fields.value, fields.unit].filter(Boolean).join(" ") : "Sonucu kontrol et";
+    row.querySelector("[data-row-reference]").textContent = fields.reference ? "Ref. " + fields.reference : "";
     const problems = {
       name: !fields.name.trim(),
       date: !validDate(fields.date),
@@ -1188,15 +1222,22 @@ function syncPreview() {
     if (missingUnit && missingReference) messages.push("Birim ve aralık boş.");
     else if (missingUnit) messages.push("Birim boş.");
     else if (missingReference) messages.push("Referans aralığı boş.");
+    const priority = needsInput ? 2 : (missingUnit || missingReference ? 1 : 0);
+    row.dataset.review = priority;
+    if (priority) reviewCount++;
     const note = row.querySelector(".preview-note");
     note.hidden = !messages.length;
     note.textContent = messages.join(" ");
   }
 
+  if (sortRows === true) {
+    rows.sort((a, b) => Number(b.dataset.review) - Number(a.dataset.review));
+    $("#preview-rows").append(...rows);
+  }
   $("#preview-bulk").hidden = !missingDate;
   const summary = [records.length - repeated + " yeni"];
   if (repeated) summary.push(repeated + " tekrar");
-  if (incomplete) summary.push(incomplete + " kontrol gerekli");
+  if (reviewCount) summary.push(reviewCount + " satırı kontrol et");
   const summaryText = summary.join(" · ");
   if ($("#preview-summary").textContent !== summaryText) $("#preview-summary").textContent = summaryText;
   if (!incomplete) formStatus("");
@@ -1209,9 +1250,10 @@ function appendPreviewRow() {
     formStatus("Bir seferde en fazla 200 ölçüm ekleyebilirsin.", true);
     return;
   }
-  container.insertAdjacentHTML("beforeend", previewRow());
+  container.insertAdjacentHTML("afterbegin", previewRow());
+  container.firstElementChild.open = true;
   syncPreview();
-  container.lastElementChild.querySelector('[data-field="name"]').focus();
+  container.firstElementChild.querySelector('[data-field="name"]').focus();
 }
 
 function fillPreviewDates() {
@@ -1239,6 +1281,7 @@ function toggleDemo() {
   if (!saveState({ ...loadState(), demo: !state.demo })) return;
   filter = "all";
   search = "";
+  resultDateFilter = "";
   render();
   $("#view-overview .demo-banner button")?.focus();
 }
@@ -1260,6 +1303,17 @@ document.addEventListener("click", event => {
     case "example": $("#report-text").value = example; formStatus(""); break;
     case "parse": parseInput(); break;
     case "detail": showDetail(button.dataset.id); break;
+    case "latest-results":
+      resultDateFilter = button.dataset.date;
+      filter = "all";
+      search = "";
+      navigate("results");
+      break;
+    case "clear-result-date":
+      resultDateFilter = "";
+      renderResults();
+      $("#result-search").focus();
+      break;
     case "favorite": toggleFavorite(button.dataset.id); break;
     case "compare": showComparison(); break;
     case "visit": showVisit(); break;
@@ -1274,8 +1328,8 @@ document.addEventListener("click", event => {
     case "append-row": appendPreviewRow(); break;
     case "fill-dates": fillPreviewDates(); break;
     case "remove-row": {
-      const row = button.closest("fieldset");
-      const nextButton = (row.nextElementSibling || row.previousElementSibling)?.querySelector(".remove-row");
+      const row = button.closest(".preview-row");
+      const nextButton = (row.nextElementSibling || row.previousElementSibling)?.querySelector("summary");
       row.remove();
       syncPreview();
       (nextButton || $('[data-action="append-row"]')).focus();
@@ -1316,8 +1370,9 @@ document.addEventListener("keydown", event => {
     selectChartPoint(point.dataset.pointId);
   }
   if (event.key !== "Tab") return;
-  const focusable = [...$("#result-modal").querySelectorAll('button:not(:disabled), input:not(:disabled), select, textarea, [tabindex="0"]')]
-    .filter(element => element.getClientRects().length > 0);
+  const focusable = [...$("#result-modal").querySelectorAll('button:not(:disabled), input:not(:disabled), select, textarea, summary, [tabindex="0"]')]
+    .filter(element => element.getClientRects().length > 0 &&
+      (element.matches("summary") || !element.closest("details:not([open])")));
   const target = event.shiftKey ? focusable[0] : focusable.at(-1);
   if (document.activeElement === target) {
     event.preventDefault();
