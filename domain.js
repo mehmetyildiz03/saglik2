@@ -110,6 +110,36 @@ export function measurement(name) {
   return aliases.get(aliasKey(name));
 }
 
+const measurementExplanations = new Map([
+  ["Hemoglobin", "Alyuvarların oksijen taşımasını sağlayan proteinin kandaki miktarını ölçer."],
+  ["Lökosit", "Bağışıklıkta görev alan beyaz kan hücrelerinin sayısını ölçer."],
+  ["Eritrosit", "Oksijen taşıyan kırmızı kan hücrelerinin sayısını ölçer."],
+  ["Hematokrit", "Kan hacminin yüzde kaçının alyuvarlardan oluştuğunu gösterir."],
+  ["Trombosit", "Kanın pıhtılaşmasına yardımcı olan trombositlerin sayısını ölçer."],
+  ["MCV", "Alyuvarların ortalama büyüklüğünü gösterir."],
+  ["Total kolesterol", "Kandaki toplam kolesterol miktarını gösterir."],
+  ["LDL kolesterol", "LDL parçacıklarının taşıdığı kolesterol miktarını gösterir."],
+  ["HDL kolesterol", "HDL parçacıklarının taşıdığı kolesterol miktarını gösterir."],
+  ["Trigliserit", "Kandaki trigliserit adı verilen yağın miktarını ölçer."],
+  ["Glukoz", "Örnek alındığı sırada kandaki şeker miktarını ölçer."],
+  ["Açlık glukozu", "Açlık sonrası kandaki şeker miktarını ölçer."],
+  ["HbA1c", "Şeker bağlanmış hemoglobinin oranını ölçer ve yaklaşık son 2–3 aydaki ortalama kan şekeri hakkında bilgi verir."],
+  ["ALT", "En çok karaciğer hücrelerinde bulunan ALT enziminin kandaki etkinliğini ölçer."],
+  ["AST", "Karaciğer ve kaslar dahil çeşitli dokularda bulunan AST enziminin kandaki etkinliğini ölçer."],
+  ["Kreatinin", "Kasların ürettiği ve böbreklerin kandan uzaklaştırdığı kreatininin kandaki miktarını ölçer."],
+  ["eGFR", "Böbreklerin kanı ne kadar hızlı süzdüğünü tahmin eden hesaplanmış bir değerdir."],
+  ["TSH", "Tiroid bezine hormon üretmesi için sinyal veren hormonun kandaki miktarını ölçer."],
+  ["Serbest T4", "Tiroidin ürettiği T4 hormonunun taşıyıcı proteinlere bağlı olmayan kısmını ölçer."],
+  ["Ferritin", "Demir depolayan ferritin proteininin kandaki miktarını ölçer ve demir depoları hakkında bilgi verir."],
+  ["D vitamini", "D vitamini düzeyini değerlendirmede kullanılan 25-OH D vitamininin kandaki miktarını ölçer."],
+  ["B12 vitamini", "Sinir sistemi ve kan hücrelerinin yapımında görev alan B12 vitamininin kandaki miktarını ölçer."],
+  ["CRP", "Vücuttaki iltihaplanmaya yanıt olarak artabilen C-reaktif proteinin kandaki miktarını ölçer."],
+]);
+
+export function measurementExplanation(name) {
+  return measurementExplanations.get(measurement(name)?.name);
+}
+
 export function systemFor(id) {
   return systems.find(system => system.id === id) || systems.at(-1);
 }

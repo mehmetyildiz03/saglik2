@@ -550,3 +550,24 @@ main { width: min(1270px, 100%); margin: 0 auto; padding: 34px clamp(22px, 4.5vw
 .preview-row .preview-note { margin: 0; padding: 0 10px 8px; }
 .preview-editor { padding: 0 10px 5px; border-top: 1px solid var(--line); }
 .preview-editor .remove-row { color: #924c3b; margin-top: 3px; }
+
+.sample-launch { background: #fffcf2; border-color: #dfd4b9; color: #4b482f; }
+.sample-launch:hover { background: var(--yellow); }
+.sample-heading { display: flex; align-items: center; justify-content: space-between; gap: 9px; padding-right: 33px; }
+.sample-heading h2 { margin-right: 0; }
+.sample-heading img { width: 62px; height: 58px; object-fit: contain; }
+.sample-source, .measurement-guide { margin: 8px 0; padding: 8px 10px; border-radius: 9px; background: #edf4ed; color: var(--dark); }
+.sample-source summary, .measurement-guide summary { min-height: 26px; padding-top: 4px; font-size: 13px; font-weight: 800; cursor: pointer; }
+.sample-source summary:focus-visible, .measurement-guide summary:focus-visible { outline: 2px solid var(--green); outline-offset: 2px; border-radius: 3px; }
+.sample-source pre { margin: 7px 0 2px; white-space: pre-wrap; font-size: 12px; }
+.measurement-guide p { margin: 3px 0; font-size: 13px; line-height: 1.5; color: var(--muted); }
+.sample-records { display: grid; gap: 5px; }
+.sample-records > div { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 7px; padding: 7px 10px; border: 1px solid var(--line); border-radius: 8px; font-size: 13px; }
+.sample-records small { display: block; margin-top: 2px; color: var(--muted); font-size: 11px; }
+.sample-compare-grid { margin-top: 8px; }
+.toast:has(img) { display: flex; align-items: center; gap: 7px; padding-block: 5px; }
+.toast img { width: 32px; height: 34px; object-fit: contain; }
+
+@media (max-width: 550px) {
+  .hero-actions .sample-launch { font-size: 13px; padding: 8px 9px; }
+}

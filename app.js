@@ -1,5 +1,5 @@
 import {
-  compareMeasurements, demoResults, displayNumber, displayValue, knownNames, measurement, metricKey, normalize, noteLimit, parseReference,
+  compareMeasurements, demoResults, displayNumber, displayValue, knownNames, measurement, measurementExplanation, metricKey, normalize, noteLimit, parseReference,
   parseReport, parseValue, readingKey, referenceText, resultKey, statusOf, statuses, systemFor, systems, validDate,
 } from "./domain.js";
 import { makeBackup, planRestore, readBackup } from "./backup.js";
@@ -96,10 +96,16 @@ function saveState(next) {
   }
 }
 
-function toast(message) {
+function toast(message, celebrate = false) {
   const element = $("#toast");
   clearTimeout(toastTimer);
   element.textContent = message;
+  if (celebrate) {
+    const mascot = document.createElement("img");
+    mascot.src = "assets/denge-sprout.webp";
+    mascot.alt = "";
+    element.prepend(mascot);
+  }
   element.classList.add("show");
   toastTimer = setTimeout(() => element.classList.remove("show"), 3300);
 }
@@ -262,7 +268,8 @@ function renderOverview() {
     <section class="hero-card">
       <div class="hero-copy"><h2>Tahlillerini tek yerde topla.</h2><p>Raporunu ekle, her ölçümü kendi grafiğinde incele ve önceki tahlillerinle karşılaştır.</p>
       <div class="hero-actions"><button class="primary-button" data-action="add" type="button">${icon("plus")} Tahlil ekle</button>
-      <button class="subtle-link" data-view="systems" type="button">Grafikleri keşfet ${icon("arrow")}</button></div></div>
+      ${state.demo ? `<button class="secondary-button sample-launch" data-action="sample" type="button">${icon("sparkle")} Örnekle dene</button>`
+        : `<button class="subtle-link" data-view="systems" type="button">Grafikleri keşfet ${icon("arrow")}</button>`}</div></div>
       <div class="hero-art" aria-hidden="true"><img src="assets/denge-sprout.webp" width="478" height="440" alt="" fetchpriority="high"></div>
     </section>
     <div class="overview-grid">
@@ -636,6 +643,36 @@ function showBackup() {
   });
 }
 
+function showSample() {
+  const records = parseReport(example).map(row => makeResult(row));
+  openModal(`<div class="sample-heading"><div>
+    <h2 id="modal-title">Örnek rapor</h2><p class="modal-intro">İki tarihten okunan ölçümleri kontrol et.</p></div>
+    <img src="assets/denge-sprout.webp" alt=""></div>
+    <details class="sample-source"><summary>Rapor metnini gör</summary><pre>${escape(example)}</pre></details>
+    <div class="sample-records">${records.map(record => `<div>
+      <span><strong>${escape(record.name)}</strong><small>${dateLabel(record.date)}</small></span>
+      <span><strong>${escape(displayValue(record))} ${escape(record.unit)}</strong><small>${escape(referenceCaption(record))}</small></span>
+    </div>`).join("")}</div>
+    <div class="form-actions"><button class="primary-button" id="sample-compare" type="button">Hemoglobini karşılaştır ${icon("arrow")}</button></div>`);
+  $("#sample-compare").addEventListener("click", () => {
+    const history = records.filter(record => record.name === "Hemoglobin");
+    openModal(`<div class="sample-heading"><div>
+      <h2 id="modal-title">İki tarihi karşılaştırdın!</h2><p class="modal-intro">Örnek hemoglobin ölçümleri</p></div>
+      <img src="assets/denge-sprout.webp" alt=""></div>
+      <div class="history-plot">${chart(history)}</div>
+      <div class="compare-grid sample-compare-grid">${history.map(record => comparisonColumn([record], record.date)).join("")}</div>
+      ${measurementGuide("Hemoglobin")}
+      <div class="form-actions"><button class="secondary-button" data-action="sample" type="button">Rapora dön</button>
+      <button class="primary-button" data-action="add" type="button">Kendi tahlilimi ekle ${icon("arrow")}</button></div>`);
+  });
+}
+
+function comparisonColumn(records, date) {
+  return `<div class="compare-column"><span>${dateLabel(date)}</span>
+    ${records.map(record => `<div class="compare-reading"><strong>${escape(displayValue(record))} <small>${escape(record.unit)}</small></strong><small>${escape(referenceCaption(record))}</small></div>`).join("")}
+  </div>`;
+}
+
 function showComparison() {
   const dates = resultDates();
   if (dates.length < 2) return;
@@ -666,11 +703,6 @@ function renderComparison() {
     container.innerHTML = '<p class="compare-note" role="status">Bu iki tarihte aynı birimle kaydedilmiş ortak bir ölçüm yok.</p>';
     return;
   }
-  function column(records, date) {
-    return `<div class="compare-column"><span>${dateLabel(date)}</span>
-      ${records.map(record => `<div class="compare-reading"><strong>${escape(displayValue(record))} <small>${escape(record.unit)}</small></strong><small>${escape(referenceCaption(record))}</small></div>`).join("")}
-    </div>`;
-  }
   container.innerHTML = `<p class="compare-note" role="status">${matched.length} ortak ölçüm</p>
     <div class="comparison-list">${matched.map(({ first, second }) => {
       const exactPair = first.length === 1 && second.length === 1 &&
@@ -680,7 +712,7 @@ function renderComparison() {
       return `<section class="comparison-card">
         <div class="comparison-heading"><h3>${escape(first[0].name)}</h3>
           ${difference ? `<span>Fark ${delta > 0 && difference !== "0" ? "+" : ""}${escape(difference === "-0" ? "0" : difference)}</span>` : ""}</div>
-        <div class="compare-grid">${column(first, firstDate)}${column(second, secondDate)}</div>
+        <div class="compare-grid">${comparisonColumn(first, firstDate)}${comparisonColumn(second, secondDate)}</div>
       </section>`;
     }).join("")}</div>`;
   completeQuest("compare");
@@ -791,6 +823,8 @@ function about() {
       <div class="about-item"><span>${icon("file")}</span><div><strong>Raporunu ekle</strong><p>PDF veya fotoğraf seç, metni yapıştır ya da bir ölçümü elle gir. Okunan değerleri raporunla karşılaştırıp onayla.</p></div></div>
       <div class="about-item"><span>${icon("activity")}</span><div><strong>Grafiğini oku</strong><p>Her nokta bir ölçümdür. Yeşil alan, grafikteki ölçümlerin ortak referans aralığını gösterir. Aralık rapordan alınır.</p></div></div>
       <div class="about-item"><span>${icon("sparkle")}</span><div><strong>Bir yıldız kazan</strong><p>Üç farklı ölçümün geçmişini keşfederek mini görevi tamamla.</p></div></div>
+      <div class="about-item"><span>${icon("file")}</span><div><strong>İki örnek tahlili karşılaştır</strong>
+        <button class="link-button" data-action="sample" type="button">Örnekle dene ${icon("arrow")}</button></div></div>
       <div class="about-item"><span>${icon("lock")}</span><div><strong>Kayıtların cihazında</strong><p>Dosya okuma tarayıcıda yapılır. Tarayıcı verilerini temizlersen defterin de silinir.</p></div></div>
       <div class="about-item"><span>${icon("phone")}</span><div><strong>Telefonda Denge</strong>
         <button class="link-button" data-action="install" type="button">Ana ekrana ekle ${icon("arrow")}</button></div></div>
@@ -855,6 +889,14 @@ async function registerOffline() {
   }
 }
 
+function measurementGuide(name) {
+  const explanation = measurementExplanation(name);
+  return explanation ? `<details class="measurement-guide">
+    <summary>Bu neyi ölçer?</summary>
+    <p>${escape(explanation)}</p>
+  </details>` : "";
+}
+
 function showDetail(id) {
   const result = activeResults().find(item => item.id === id);
   if (!result) return;
@@ -864,7 +906,7 @@ function showDetail(id) {
   if (!current.discoveries.includes(key) && current.discoveries.length < 3) {
     if (saveState({ ...current, discoveries: [...current.discoveries, key] })) {
       renderQuest();
-      toast(state.discoveries.length === 3 ? "✦ Keşif görevi tamamlandı!" : "✦ Bir keşif yıldızı kazandın.");
+      toast(state.discoveries.length === 3 ? "✦ Keşif görevi tamamlandı!" : "✦ Bir keşif yıldızı kazandın.", state.discoveries.length === 1);
     }
   }
   openModal(`<p class="eyebrow">${systemFor(result.system).name}${state.demo ? " · ÖRNEK" : ""}</p>
@@ -872,6 +914,7 @@ function showDetail(id) {
     <p class="modal-intro">${history.length} kayıt${result.unit ? ` · ${escape(result.unit)}` : ""}</p>
     <div class="history-plot">${chart(history, id)}</div>
     <div class="point-details" id="point-details" aria-live="polite"></div>
+    ${measurementGuide(result.name)}
     <h3 class="history-heading">Ölçüm geçmişi</h3>
     <div class="history-list">${history.slice().reverse().map(item => `
       <div class="history-row"><span><button class="history-date" data-point-id="${escape(item.id)}" type="button">${dateLabel(item.date)}</button><small>${escape(referenceCaption(item))}</small></span>
@@ -1026,13 +1069,16 @@ function saveResults(records, existing) {
   const latestEntryDate = added && !existing
     ? results.slice(-added).reduce((date, record) => record.date > date ? record.date : date, "")
     : current.latestEntryDate;
-  if (!saveState({ ...current, demo: false, results, latestEntryDate })) return;
+  const firstSave = added > 0 && !existing && !current.results.length && !current.firstSaveCelebrated;
+  if (!saveState({ ...current, demo: false, results, latestEntryDate,
+    ...(firstSave ? { firstSaveCelebrated: true } : {}) })) return;
   closeModal();
   filter = "all";
   search = "";
   resultDateFilter = "";
   navigate("results");
-  toast(existing ? "Kayıt güncellendi." : added ? `${added} sonuç defterine eklendi.` : "Bu sonuçlar defterinde zaten kayıtlı.");
+  toast(firstSave ? `İlk tahlilin defterinde! ${added} sonuç eklendi.`
+    : existing ? "Kayıt güncellendi." : added ? `${added} sonuç defterine eklendi.` : "Bu sonuçlar defterinde zaten kayıtlı.", firstSave);
 }
 
 function bindFile() {
@@ -1303,6 +1349,7 @@ document.addEventListener("click", event => {
     case "example": $("#report-text").value = example; formStatus(""); break;
     case "parse": parseInput(); break;
     case "detail": showDetail(button.dataset.id); break;
+    case "sample": showSample(); break;
     case "latest-results":
       resultDateFilter = button.dataset.date;
       filter = "all";
